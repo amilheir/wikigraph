@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WikiGraph &mdash; a self-growing encyclopedia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,50&family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* InterSystems palette: deep navy ink, InterSystems blue accent, cyan secondary */
+  --paper: #eef3f9;
+  --paper-deep: #e1eaf3;
+  --ink: #2f2a95;
+
+  --oxblood: #00b2a9;
+  --oxblood-bright: #00ccc2;
+  --gold: #00a9c7;
+  --rule: rgba(17, 43, 77, .25);
+  --card: #ffffff;
+  --shadow: 0 2px 0 rgba(17,43,77,.06), 0 18px 40px -22px rgba(17,43,77,.45);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Newsreader", Georgia, serif;
+  background:
+    radial-gradient(1200px 500px at 80% -10%, rgba(0,169,199,.12), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgba(0,133,202,.12), transparent 55%),
+    var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* faint knowledge-graph constellation backdrop */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: .55;
+  /*background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="520" height="420" viewBox="0 0 520 420"><g stroke="%230085ca" stroke-opacity="0.10" fill="none"><path d="M60 80 L180 40 L300 110 L430 60 M180 40 L210 200 L80 290 M300 110 L210 200 L390 250 L430 60 M80 290 L240 360 L390 250"/></g><g fill="%230085ca" fill-opacity="0.14"><circle cx="60" cy="80" r="3"/><circle cx="18₀" cy="4₀" r="4"/><circle cx="3₀₀" cy="1₁₀" r="3"/><circle cx="4₃₀" cy="6₀" r="4"/><circle cx="2₁₀" cy="2₀₀" r="5"/><circle cx="8₀" cy="2₉₀" r="3"/><circle cx="3₉₀" cy="2₅₀" r="4"/><circle cx="2₄₀" cy="3₆₀" r="3"/></g></svg>');*/
+}
+
+header {
+  border-bottom: 1.5px solid var(--rule);
+  background: #ffffff;
+  padding: 1.1rem 1.4rem .9rem;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.masthead {
+  max-width: 880px;
+  margin: 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+h1 {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: bolder;
+  font-size: clamp(1.7rem, 4vw, 2.4rem);
+  letter-spacing: -.02em;
+}
+h1 .wiki { color: var(--ink); }
+h1 .graph { color: var(--oxblood); font-style: italic; }
+.tagline {
+  font-variant: small-caps;
+  letter-spacing: .18em;
+  color: var(--ink);
+  font-size: .8rem;
+}
+
+.langToggle {
+  display: inline-flex;
+  border: 1.5px solid var(--ink);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--card);
+
+}
+.langToggle button {
+  font-family: "Newsreader", Georgia, serif;
+  font-size: .75m;
+  font-weight: 700;
+  letter-spacing: .06em;
+  padding: .4rem .8rem;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all .2s ease;
+}
+.langToggle button.active {
+  background: var(--oxblood);
+  color: var(--card);
+}
+
+.headerTools {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+}
+.menuWrap { position: relative; }
+.menuBtn {
+  font-size: 1.1rem;
+  line-height: 1;
+  width: 2.3rem;
+  height: 2.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--ink);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  transition: all .18s ease;
+}
+.menuBtn:hover { background: var(--ink); color: var(--card); }
+.menuBtn:active { transform: translateY(1px); }
+.menuDropdown {
+  position: absolute;
+  top: calc(100% + .5rem);
+  right: 0;
+  min-width: 180px;
+  background: var(--card);
+  border: 1.5px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: .35rem;
+  display: none;
+  flex-direction: column;
+  gap: .15rem;
+  z-index: 30;
+}
+.menuDropdown.open { display: flex; animation: rise .18s ease both; }
+.menuDropdown button {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  text-align: left;
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 600;
+  font-size: .95rem;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  padding: .6rem .75rem;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.menuDropdown button:hover { background: var(--paper-deep); }
+.menuDropdown .mi { font-size: 1.1rem; }
+
+.sidePanel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: max-content;
+  background: var(--card);
+  border-left: 1.5px solid var(--rule);
+  box-shadow: -22px 0 50px -28px rgba(17,43,77,.55);
+  transform: translateX(100%);
+  transition: transform .28s cubic-bezier(.4,0,.2,1);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+}
+.sidePanel.open { transform: translateX(0); }
+.sidePanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.15rem 1.3rem;
+  border-bottom: 1.5px solid var(--rule);
+  background: linear-gradient(var(--card), var(--paper));
+}
+#sidePanelTitle {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 800;
+  font-size: 1.25rem;
+  color: var(--ink);
+  letter-spacing: -.01em;
+}
+.sidePanelClose {
+  font-size: 1.5rem;
+  line-height: 1;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.sidePanelClose:hover { background: var(--paper-deep); color: var(--ink); }
+.sidePanelBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.3rem;
+}
+.panelSection .kbManage { flex-direction: column; align-items: stretch; margin: 0; max-width: none; }
+.panelSection #articleSelect { max-width: max-content; }
+.kbActions { display: flex; align-items: center; gap: .55rem; }
+.panelSection .kbActions { align-self: flex-start; }
+.kbAdd { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1.5rem; margin-top: 1.5rem; }
+#addLabel { font-variant: small-caps; letter-spacing: .12em; color: var(--ink); font-size: .8rem; }
+.kbAddRow { display: flex; gap: .5rem; align-items: center; }
+#addTitle { flex: 1; min-width: 160px; font-family: "Newsreader", Georgia, serif; font-size: .92rem; color: var(--ink);
+  background: var(--card); border: 1.5px solid var(--rule); border-radius: 10px; padding: .42rem .7rem; }
+#addTitle::placeholder { color: var(--ink); font-style: italic; }
+#addBtn { font-family: "Newsreader", Georgia, serif; font-weight: 700; font-size: .8rem; letter-spacing: .06em; color: var(--ink);
+  background: var(--card); border: 1.5px solid var(--ink); border-radius: 10px; padding: .44rem 1.1rem;
+  cursor: pointer; white-space: nowrap; box-shadow: none; transition: all .2s ease; }
+#addBtn:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
+#addBtn:active:not(:disabled) { transform: translateY(1px); }
+#addBtn:disabled { opacity: .5; cursor: wait; }
+.addStatus { font-size: .85rem; color: var(--ink); min-height: 1.1em; line-height: 1.4; }
+.panelSection .kbStats { margin-top: 1.2rem; margin-left: 0.rem; text-align: left; }
+
+/* documentation panel: full-bleed iframe of the standalone overview document */
+#panelDocs { height: 100%; }
+.docsFrame { width: 100%; height: 100%; border: 0; background: #fff; }
+.sidePanel[data-panel="docs"] { width: min(880px, 96vw); }
+.sidePanel[data-panel="docs"] .sidePanelBody { padding: 0; }
+#panelGraph { height: 100%; }
+.sidePanel[data-panel="graph"] { width: 85vw; }
+.sidePanel[data-panel="graph"] .sidePanelBody { padding: 0; }
+
+
+.kbManage {
+  max-width: 880px;
+  min-width: 410px;
+  margin: .85rem auto 0;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+}
+.manageLang {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  flex-wrap: wrap;
+  margin-bottom: .25rem;
+}
+.manageLang #manageLangLabel {
+  font-variant: small-caps;
+  letter-spacing: .12em;
+  color: var(--ink);
+  font-size: .8rem;
+}
+.kbManage label {
+  font-variant: small-caps;
+  letter-spacing: .12em;
+  color: var(--ink);
+  font-size: .8rem;
+}
+#articleSelect {
+  flex: 1;
+  min-width: 180px;
+  max-width: 520px;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: .92rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1.5px solid var(--rule);
+  border-radius: 10px;
+  padding: .42rem .7rem;
+  cursor: pointer;
+}
+#articleSelect:disabled { color: var(--ink); cursor: default; }
+#deleteBtn {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 700;
+  font-size: .8rem;
+  letter-spacing: .04em;
+  color: #b3261e;
+  background: var(--card);
+  border: 1.5px solid #b3261e;
+  border-radius: 10px;
+  padding: .44rem .95rem;
+  cursor: pointer;
+  transition: all .18s ease;
+  white-space: nowrap;
+}
+#deleteBtn:hover:not(:disabled) { background: #b3261e; color: #fff; }
+#deleteBtn:active:not(:disabled) { transform: translateY(1px); }
+#deleteBtn:disabled { opacity: .4; cursor: not-allowed; border-color: var(--rule); color: var(--ink); }
+
+#deleteAllBtn {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 700;
+  font-size: .8rem;
+  letter-spacing: .04em;
+  color: #b3261e;
+  background: var(--card);
+  border: 1.5px solid #b3261e;
+  border-radius: 10px;
+  padding: .44rem .95rem;
+  cursor: pointer;
+  transition: all .18s ease;
+  white-space: nowrap;
+}
+#deleteAllBtn:hover:not(:disabled) { background: #b3261e; color: #fff; }
+#deleteAllBtn:active:not(:disabled) { transform: translateY(1px); }
+#deleteAllBtn:disabled { opacity: .4; cursor: not-allowed; border-color: var(--rule); color: var(--ink); }
+
+#articleStats { margin-top: 1rem; }
+#articleStats:empty { display: none; }
+
+main {
+  flex: 1;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 1.6rem 1.2rem 12.5rem;
+}
+
+.notice {
+  text-align: center;
+  font-style: italic;
+  color: var(--ink);
+  margin: 2.2rem auto;
+  max-width: 34rem;
+  line-height: 1.6;
+}
+.notice strong { color: var(--oxblood); font-style: normal; }
+
+.msg {
+  display: flex;
+  margin: 1.1rem 0;
+  animation: rise .35s ease both;
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.msg.user { justify-content: flex-end; }
+.bubble {
+  max-width: 78%;
+  padding: .85rem 1.1rem;
+  line-height: 1.55;
+  font-size: 1.04rem;
+  border-radius: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-shadow: 3px 3px 0 rgba(17,43,77,.3);
+}
+.msg.user .bubble {
+  background: var(--ink);
+  color: var(--paper);
+  border-bottom-right-radius: 3px;
+  box-shadow: var(--shadow);
+}
+.msg.bot .bubble {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--oxblood);
+  border-bottom-left-radius: 3px;
+  box-shadow: var(--shadow);
+}
+.msg.bot .bubble.error { border-left-color: #b3261e; color: #7a1d16; }
+
+.statusBubble {
+  display: inline-flex;
+  align-items: center;
+  gap: .6rem;
+  font-style: italic;
+  color: var(--ink);
+}
+.statusBubble .icon { font-style: normal; font-size: 1.15rem; }
+.statusBubble.learning { border-left-color: var(--gold) !important; }
+.statusBubble .detail { font-size: .98rem; }
+.dots::after {
+  content: "";
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: dots 1.4s steps(4, end) infinite;
+}
+@keyframes dots {
+  0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; }
+}
+
+footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(transparent, var(--paper) 35%);
+  padding: 2.2rem 1.2rem 1.4rem;
+}
+.composer {
+  max-width: 880px;
+  margin: 0 auto;
+  margin-bottom: 1.4rem;
+  display: flex;
+  gap: .6rem;
+  background: var(--card);
+  border: 1.5px solid var(--ink);
+  border-radius: 16px;
+  padding: .55rem .55rem .55rem 1.1rem;
+  box-shadow: 3px 3px 0 rgba(17,43,77,.3);
+}
+.composer input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 1.08rem;
+  color: var(--ink);
+  outline: none;
+}
+.composer input::placeholder { color: var(--ink); font-style: italic; }
+.composer button {
+ font-family: "Newsreader", Georgia, serif;
+  font-weight: 700;
+  letter-spacing: .06em;
+  font-size: .8rem;
+  background: var(--card);
+  color: var(--ink);
+  border: 1.5px solid var(--ink);
+  border-radius: 10px;
+  padding: .6rem 1.3rem;
+  cursor: pointer;
+  box-shadow: none;
+  transition: all .2s ease;
+}
+.composer button:hover { background: var(--ink); color: var(--paper);}
+.composer button:active { transform: translateY(1px); }
+.composer button:disabled { opacity: .45; cursor: wait; }
+
+.kbStats {
+  text-align: center;
+  margin-top: .7rem;
+  font-size: .8rem;
+  letter-spacing: .12em;
+  line-height:20px;
+  font-variant: small-caps;
+  color: var(--ink);
+}
+.kbStats b { color: var(--oxblood); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="masthead">
+    <div>
+      <h1><span class="wiki">Wiki</span><span class="graph">Graph</span></h1>
+      <div class="tagline" id="tagline">a self-growing knowledge base &middot; iris graphrag</div>
+    </div>
+    <div class="headerTools">
+      <div class="langToggle" role="group" aria-label="Wikipedia language">
+        <button id="langEn" class="active" onclick="setLang('en')">EN</button>
+        <button id="langPt" onclick="setLang('pt')">PT</button>
+      </div>
+      <div class="menuWrap">
+        <button id="menuBtn" class="menuBtn" aria-haspopup="true" aria-expanded="false"
+                aria-label="Menu" onclick="toggleMenu(event)">&#9776;</button>
+        <div class="menuDropdown" id="menuDropdown" role="menu">
+          <button role="menuitem" onclick="openPanel('docs')"><span id="menuDocs">Documentation</span></button>
+          <button role="menuitem" onclick="openPanel('graph')"><span id="menuGraph">Knowledge graph</span></button>
+          <button role="menuitem" onclick="openPanel('manage')"><span id="menuManage">Manage knowledge</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<aside id="sidePanel" class="sidePanel" aria-hidden="true">
+  <div class="sidePanelHead">
+    <span id="sidePanelTitle"></span>
+    <button class="sidePanelClose" onclick="closePanel()" aria-label="Close">&times;</button>
+  </div>
+  <div class="sidePanelBody">
+    <section id="panelDocs" class="panelSection">
+      <iframe id="docsFrame" class="docsFrame" title="Documentation" src="about:blank"></iframe>
+    </section>
+    <section id="panelGraph" class="panelSection" hidden>
+      <iframe id="graphFrame" class="docsFrame" title="Knowledge graph" src="about:blank"></iframe>
+    </section>
+    <section id="panelManage" class="panelSection" hidden>
+      <div class="manageLang">
+        <span id="manageLangLabel">Knowledge language:</span>
+        <div class="langToggle" role="group" aria-label="Knowledge language">
+          <button id="manageLangEn" class="active" onclick="setLang('en')">EN</button>
+          <button id="manageLangPt" onclick="setLang('pt')">PT</button>
+        </div>
+      </div>
+      <div class="kbManage">
+        <label for="articleSelect" id="manageLabel">Manage knowledge:</label>
+        <select id="articleSelect" aria-label="Choose an article to delete"></select>
+        <div class="kbActions">
+          <button id="deleteBtn" type="button" disabled>Delete article</button>
+          <button id="deleteAllBtn" type="button" disabled>Delete all</button>
+        </div>
+      </div>
+      <div class="kbStats" id="articleStats"></div>
+      <div class="kbStats" id="kbStats"></div>
+      <div class="kbAdd">
+        <label for="addTitle" id="addLabel">Add a Wikipedia article directly:</label>
+        <div class="kbAddRow">
+          <input id="addTitle" type="text" autocomplete="off" placeholder="Wikipedia title(s) — comma-separated for several…" aria-label="Wikipedia article titles, comma-separated">
+          <button id="addBtn" type="button">Add</button>
+        </div>
+        <div class="addStatus" id="addStatus"></div>
+      </div>
+    </section>
+  </div>
+</aside>
+
+<main id="chatLog">
+  <p class="notice" id="welcome">
+    Ask me anything. If I don&rsquo;t know the answer yet, I&rsquo;ll <strong>learn it from Wikipedia</strong> &mdash;
+    one article at a time &mdash; and weave it into my knowledge graph before replying.
+  </p>
+</main>
+
+<footer>
+  <form class="composer" id="composer">
+    <input id="questionInput" autocomplete="off" placeholder="Tell me about..." aria-label="Your question">
+    <button id="sendBtn" type="submit">Ask</button>
+  </form>
+</footer>
+
+<script>
+const baseUrl = location.pathname.endsWith("/") ? location.pathname : location.pathname + "/";
+const chatLog = document.getElementById("chatLog");
+const questionInput = document.getElementById("questionInput");
+const sendBtn = document.getElementById("sendBtn");
+const articleSelect = document.getElementById("articleSelect");
+const deleteBtn = document.getElementById("deleteBtn");
+const deleteAllBtn = document.getElementById("deleteAllBtn");
+const addTitle = document.getElementById("addTitle");
+const addBtn = document.getElementById("addBtn");
+const addStatus = document.getElementById("addStatus");
+let kbDocs = [];
+let lang = "en";
+
+const I18N = {
+  en: {
+    tagline: "a self-growing knowledge base · iris graphrag",
+    welcomeHtml: "Ask me anything. If I don’t know the answer yet, I’ll <strong>learn it from Wikipedia</strong> — " +
+                 "one article at a time — and weave it into my knowledge graph before replying.",
+    placeholder: "Tell me about...",
+    ask: "Ask",
+    manageLang: "Knowledge language:",
+    manageLabel: "Manage knowledge:",
+    deleteBtn: "Delete article",
+    deleteAll: "Delete all",
+    addLabel: "Add an article:",
+    addPlaceholder: "Wikipedia title(s) — comma-separated for several…",
+    addBtn: "Add",
+    addWorking: "Adding…",
+    addBatchDone: (ok, fail) => "✓ Added: " + ok + (fail ? " · failed: " + fail : "") + ".",
+    articleStatsHtml: (doc) => "<p>Selected article: <br> &middot; <b>" + (doc.chunks||0) + "</b> chunks <br> &middot; <b>" + (doc.entities||0) + "</b> entities</p>",
+    confirmDeleteAll: (n) => "Delete ALL " + n + " article" + (n===1?"":"s") + " and clear the entire knowledge graph?\n\nThis cannot be undone.",
+    clearedAll: (n) => "🗑️ Cleared the knowledge base — " + n + " article" + (n===1?"":"s") + " removed.",
+    noArticles: "— no articles learned yet —",
+    statsHtml: (s) => "<p>Knowledge graph: <br> &middot; <b>" + (s.documents || 0) + "</b> articles <br> &middot; <b>" +
+      (s.chunks || 0) + "</b> chunks <br> &middot; <b>" + (s.entities || 0) + "</b> entities <br> &middot; <b>" +
+      (s.relationships || 0) + "</b> relations</p>",
+    optionLabel: (doc) => doc.title + "  (" + doc.lang + " · " + doc.chunks + " chunks · " + doc.entities + " entities)",
+    confirmDelete: (t) => "Delete “" + t + "” and all of its chunks, entities and relationships?\n\nThis cannot be undone.",
+    removed: (t) => "🗑️ Removed “" + t + "” and everything derived from it.",
+    deleteError: (m) => "⚠️ Could not delete the article: " + m,
+    genericError: "Something went wrong.",
+    thisArticle: "this article",
+    menuDocs: "Documentation",
+    menuGraph: "Knowledge graph",
+    menuManage: "Manage knowledge",
+    docsTitle: "Documentation",
+    manageTitle: "Manage knowledge",
+    status: { pending: "Thinking", searching: "Searching my knowledge graph",
+              learning: "Learning from Wikipedia", answering: "Writing the answer" }
+  },
+  pt: {
+    tagline: "a self-growing knowledge base · iris graphrag",
+    welcomeHtml: "Pergunte o que quiser. Se eu ainda não souber a resposta, vou <strong>aprender na Wikipédia</strong> — " +
+                 "um artigo de cada vez — e integrá-la ao meu grafo de conhecimento antes de responder.",
+    placeholder: "Me fale sobre...",
+    ask: "Perguntar",
+    manageLang: "Idioma do conhecimento:",
+    manageLabel: "Gerenciar conhecimento:",
+    deleteBtn: "Excluir artigo",
+    deleteAll: "Excluir tudo",
+    addLabel: "Adicionar artigo:",
+    addPlaceholder: "Título(s) da Wikipédia — separados por vírgula…",
+    addBtn: "Adicionar",
+    addWorking: "Adicionando…",
+    addBatchDone: (ok, fail) => "✓ Adicionados: " + ok + (fail ? " · falharam: " + fail : "") + ".",
+    articleStatsHtml: (doc) => "<p>Artigo selecionado: <br> &middot; <b>" + (doc.chunks||0) + "</b> trechos <br> &middot; <b>" + (doc.entities||0) + "</b> entidades</p>",
+    confirmDeleteAll: (n) => "Excluir TODOS os " + n + " artigo" + (n===1?"":"s") + " e limpar todo o grafo de conhecimento?\n\nIsso não pode ser desfeito.",
+    clearedAll: (n) => "🗑️ Base de conhecimento limpa — " + n + " artigo" + (n===1?"":"s") + " removido" + (n===1?"":"s") + ".",
+    noArticles: "— nenhum artigo aprendido ainda —",
+    statsHtml: (s) => "<p>Grafo de conhecimento: <br> &middot; <b>" + (s.documents || 0) + "</b> artigos <br> &middot; <b>" +
+      (s.chunks || 0) + "</b> trechos <br> &middot; <b>" + (s.entities || 0) + "</b> entidades <br> &middot; <b>" +
+      (s.relationships || 0) + "</b> relações</p>",
+    optionLabel: (doc) => doc.title + "  (" + doc.lang + " · " + doc.chunks + " trechos · " + doc.entities + " entidades)",
+    confirmDelete: (t) => "Excluir “" + t + "” e todos os seus trechos, entidades e relações?\n\nIsso não pode ser desfeito.",
+    removed: (t) => "🗑️ Removido “" + t + "” e tudo que derivou dele.",
+    deleteError: (m) => "⚠️ Não foi possível excluir o artigo: " + m,
+    genericError: "Algo deu errado.",
+    thisArticle: "este artigo",
+    menuDocs: "Documentação",
+    menuGraph: "Grafo de conhecimento",
+    menuManage: "Gerenciar conhecimento",
+    docsTitle: "Documentação",
+    manageTitle: "Gerenciar conhecimento",
+    status: { pending: "Pensando", searching: "Pesquisando no meu grafo de conhecimento",
+              learning: "Aprendendo com a Wikipédia", answering: "Escrevendo a resposta" }
+  }
+};
+const STATUS_ICON = { pending: "✨", searching: "🔍", learning: "📚", answering: "✍️" };
+const t = () => I18N[lang];
+
+function setLang(newLang) {
+  lang = newLang;
+  document.documentElement.lang = lang;
+  document.getElementById("langEn").classList.toggle("active", lang === "en");
+  document.getElementById("langPt").classList.toggle("active", lang === "pt");
+  document.getElementById("manageLangEn").classList.toggle("active", lang === "en");
+  document.getElementById("manageLangPt").classList.toggle("active", lang === "pt");
+  const dict = t();
+  questionInput.placeholder = dict.placeholder;
+  document.getElementById("tagline").textContent = dict.tagline;
+  document.getElementById("manageLangLabel").textContent = dict.manageLang;
+  document.getElementById("manageLabel").textContent = dict.manageLabel;
+  document.getElementById("addLabel").textContent = dict.addLabel;
+  addTitle.placeholder = dict.addPlaceholder;
+  addBtn.textContent = dict.addBtn;
+  deleteBtn.textContent = dict.deleteBtn;
+  deleteAllBtn.textContent = dict.deleteAll;
+  sendBtn.textContent = dict.ask;
+  document.getElementById("menuDocs").textContent = dict.menuDocs;
+  document.getElementById("menuGraph").textContent = dict.menuGraph;
+  document.getElementById("menuManage").textContent = dict.menuManage;
+  // keep the open side-panel's title in sync with the language
+  if (sidePanel.classList.contains("open")) {
+    const panel = sidePanel.dataset.panel;
+    document.getElementById("sidePanelTitle").textContent =
+      panel === "manage" ? dict.manageTitle : panel === "graph" ? dict.menuGraph : dict.docsTitle;
+  }
+  const welcome = document.getElementById("welcome");
+  if (welcome) welcome.innerHTML = dict.welcomeHtml;
+  // re-render the server-fed sections in the new language
+  refreshStats();
+  refreshDocuments();
+  // if the knowledge-graph panel is open, reload it scoped to the new language
+  if (sidePanel.classList.contains("open") && sidePanel.dataset.panel === "graph") {
+    const frame = document.getElementById("graphFrame");
+    frame.src = baseUrl + "docs/graph.html?lang=" + lang;
+    frame.dataset.lang = lang;
+  }
+}
+
+const sidePanel = document.getElementById("sidePanel");
+const menuBtn = document.getElementById("menuBtn");
+const menuDropdown = document.getElementById("menuDropdown");
+
+function toggleMenu(event) {
+  if (event) event.stopPropagation();
+  const open = menuDropdown.classList.toggle("open");
+  menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function closeMenu() {
+  menuDropdown.classList.remove("open");
+  menuBtn.setAttribute("aria-expanded", "false");
+}
+
+function openPanel(which) {
+  closeMenu();
+  sidePanel.dataset.panel = which;
+  document.getElementById("panelDocs").hidden = which !== "docs";
+  document.getElementById("panelGraph").hidden = which !== "graph";
+  document.getElementById("panelManage").hidden = which !== "manage";
+  document.getElementById("sidePanelTitle").textContent =
+    which === "manage" ? t().manageTitle : which === "graph" ? t().menuGraph : t().docsTitle;
+  if (which === "docs") {
+    // load the standalone documentation file on first open
+    const frame = document.getElementById("docsFrame");
+    const target = baseUrl + "docs/overview.html";
+    if (!frame.src.endsWith("docs/overview.html")) frame.src = target;
+  } else if (which === "graph") {
+    // load the knowledge-graph constellation, scoped to the selected language
+    const frame = document.getElementById("graphFrame");
+    const target = baseUrl + "docs/graph.html?lang=" + lang;
+    if (frame.dataset.lang !== lang) { frame.src = target; frame.dataset.lang = lang; }
+  } else {
+    refreshStats();
+    refreshDocuments();
+  }
+  sidePanel.classList.add("open");
+  sidePanel.setAttribute("aria-hidden", "false");
+}
+
+function closePanel() {
+  sidePanel.classList.remove("open");
+  sidePanel.setAttribute("aria-hidden", "true");
+}
+
+// dismiss the dropdown / panel when clicking elsewhere or pressing Escape
+document.addEventListener("click", (event) => {
+  if (!menuDropdown.contains(event.target) && event.target !== menuBtn) closeMenu();
+  if (sidePanel.classList.contains("open") &&
+      !sidePanel.contains(event.target) && !menuDropdown.contains(event.target) && event.target !== menuBtn) {
+    closePanel();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") { closeMenu(); closePanel(); }
+});
+
+function appendMessage(role, text, extraClass) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "msg " + role;
+  const bubble = document.createElement("div");
+  bubble.className = "bubble" + (extraClass ? " " + extraClass : "");
+  bubble.textContent = text;
+  wrapper.appendChild(bubble);
+  chatLog.appendChild(wrapper);
+  wrapper.scrollIntoView({ behavior: "smooth", block: "end" });
+  return bubble;
+}
+
+function appendStatusBubble() {
+  const bubble = appendMessage("bot", "", "statusBubble");
+  bubble.innerHTML = '<span class="icon"></span><span><span class="detail"></span><span class="dots"></span></span>';
+  return bubble;
+}
+
+function updateStatusBubble(bubble, status, statusDetail) {
+  bubble.classList.toggle("learning", status === "learning");
+  bubble.querySelector(".icon").textContent = STATUS_ICON[status] || STATUS_ICON.pending;
+  const localized = t().status[status] || t().status.pending;
+  // the server's statusDetail is English-only, so only show it in EN; PT uses the localized text
+  bubble.querySelector(".detail").textContent = (lang === "en" && statusDetail) ? statusDetail : localized;
+}
+
+async function refreshStats() {
+  try {
+    const stats = await (await fetch(baseUrl + "api/stats?lang=" + lang)).json();
+    document.getElementById("kbStats").innerHTML = t().statsHtml(stats);
+  } catch (e) { /* stats are decorative */ }
+}
+
+async function refreshDocuments() {
+  try {
+    const data = await (await fetch(baseUrl + "api/documents?lang=" + lang)).json();
+    const docs = data.documents || [];
+    kbDocs = docs;
+    articleSelect.innerHTML = "";
+    if (docs.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = t().noArticles;
+      articleSelect.appendChild(opt);
+      articleSelect.disabled = true;
+      deleteBtn.disabled = true;
+      deleteAllBtn.disabled = true;
+      updateArticleStats();
+      return;
+    }
+    articleSelect.disabled = false;
+    deleteBtn.disabled = false;
+    deleteAllBtn.disabled = false;
+    docs.forEach((doc) => {
+      const opt = document.createElement("option");
+      opt.value = doc.id;
+      opt.dataset.title = doc.title;
+      opt.textContent = t().optionLabel(doc);
+      articleSelect.appendChild(opt);
+    });
+    updateArticleStats();
+  } catch (e) { /* leave the dropdown as-is on a transient error */ }
+}
+
+// stats for the article currently selected in the dropdown (from /api/documents)
+function updateArticleStats() {
+  const el = document.getElementById("articleStats");
+  if (!el) return;
+  const doc = kbDocs.find((d) => String(d.id) === String(articleSelect.value));
+  el.innerHTML = doc ? t().articleStatsHtml(doc) : "";
+}
+articleSelect.addEventListener("change", updateArticleStats);
+
+// --- add article(s) to the knowledge base by Wikipedia title ---
+// the field accepts a comma-separated list; each title is fetched and ingested in sequence.
+async function addArticle() {
+  const titles = [...new Set(addTitle.value.split(",").map((s) => s.trim()).filter(Boolean))];
+  if (titles.length === 0 || addBtn.disabled) return;
+  addBtn.disabled = true;
+  addTitle.disabled = true;
+  let ok = 0, fail = 0;
+  for (let i = 0; i < titles.length; i++) {
+    const title = titles[i];
+    const prefix = titles.length > 1 ? "(" + (i + 1) + "/" + titles.length + ") " : "";
+    addStatus.textContent = "📚 " + prefix + t().addWorking + " — " + title;
+    try {
+      const response = await fetch(baseUrl + "api/documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title, lang: lang })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || response.statusText);
+      const result = await pollAdd(data.requestId, prefix);
+      if (result === "error") fail++; else ok++;
+    } catch (e) {
+      fail++;
+      addStatus.textContent = "⚠️ " + prefix + e.message;
+    }
+    refreshDocuments();
+    refreshStats();
+  }
+  // for a batch, replace the last per-item message with a summary
+  if (titles.length > 1) addStatus.textContent = t().addBatchDone(ok, fail);
+  addTitle.value = "";
+  addBtn.disabled = false;
+  addTitle.disabled = false;
+}
+
+// poll one add request until it finishes; resolves with "done" or "error".
+function pollAdd(requestId, prefix) {
+  prefix = prefix || "";
+  return new Promise((resolve) => {
+    const timer = setInterval(async () => {
+      try {
+        const response = await fetch(baseUrl + "api/chat/" + requestId);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.status === "done") {
+          clearInterval(timer);
+          addStatus.textContent = "✓ " + prefix + (data.answer || data.statusDetail || "");
+          resolve("done");
+        } else if (data.status === "error") {
+          clearInterval(timer);
+          addStatus.textContent = "⚠️ " + prefix + (data.statusDetail || t().genericError);
+          resolve("error");
+        } else {
+          addStatus.textContent = "📚 " + prefix + (data.statusDetail || t().addWorking);
+        }
+      } catch (e) { /* transient - keep polling */ }
+    }, 1500);
+  });
+}
+addBtn.addEventListener("click", addArticle);
+addTitle.addEventListener("keydown", (e) => { if (e.key === "Enter") addArticle(); });
+
+deleteBtn.addEventListener("click", async () => {
+  const id = articleSelect.value;
+  if (!id) return;
+  const title = articleSelect.options[articleSelect.selectedIndex].dataset.title || t().thisArticle;
+  if (!confirm(t().confirmDelete(title))) return;
+  deleteBtn.disabled = true;
+  articleSelect.disabled = true;
+  try {
+    const response = await fetch(baseUrl + "api/documents/" + id, { method: "DELETE" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || response.statusText);
+    const welcome = document.getElementById("welcome");
+    if (welcome) welcome.remove();
+    appendMessage("bot", t().removed(data.title));
+  } catch (e) {
+    appendMessage("bot", t().deleteError(e.message), "error");
+  }
+  await refreshDocuments();
+  await refreshStats();
+});
+
+deleteAllBtn.addEventListener("click", async () => {
+  const total = kbDocs.length;
+  if (!total) return;
+  if (!confirm(t().confirmDeleteAll(total))) return;
+  deleteAllBtn.disabled = true;
+  deleteBtn.disabled = true;
+  articleSelect.disabled = true;
+  let removed = 0;
+  for (const doc of kbDocs.slice()) {
+    try {
+      const response = await fetch(baseUrl + "api/documents/" + doc.id, { method: "DELETE" });
+      if (response.ok) removed++;
+    } catch (e) { /* keep going; report the total at the end */ }
+  }
+  const welcome = document.getElementById("welcome");
+  if (welcome) welcome.remove();
+  appendMessage("bot", t().clearedAll(removed));
+  await refreshDocuments();
+  await refreshStats();
+});
+
+function pollAnswer(requestId, statusBubble) {
+  const timer = setInterval(async () => {
+    try {
+      const response = await fetch(baseUrl + "api/chat/" + requestId);
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.status === "done") {
+        clearInterval(timer);
+        statusBubble.closest(".msg").remove();
+        appendMessage("bot", data.answer);
+        sendBtn.disabled = false;
+        refreshStats();
+        refreshDocuments();
+      } else if (data.status === "error") {
+        clearInterval(timer);
+        statusBubble.closest(".msg").remove();
+        appendMessage("bot", "⚠️ " + (data.statusDetail || t().genericError), "error");
+        sendBtn.disabled = false;
+      } else {
+        updateStatusBubble(statusBubble, data.status, data.statusDetail);
+      }
+    } catch (e) { /* transient network error - keep polling */ }
+  }, 1500);
+}
+
+document.getElementById("composer").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const question = questionInput.value.trim();
+  if (!question || sendBtn.disabled) return;
+  const welcome = document.getElementById("welcome");
+  if (welcome) welcome.remove();
+
+  appendMessage("user", question);
+  questionInput.value = "";
+  sendBtn.disabled = true;
+  const statusBubble = appendStatusBubble();
+  updateStatusBubble(statusBubble, "pending", "");
+
+  try {
+    const response = await fetch(baseUrl + "api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: question, lang: lang })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || response.statusText);
+    pollAnswer(data.requestId, statusBubble);
+  } catch (e) {
+    statusBubble.closest(".msg").remove();
+    appendMessage("bot", "⚠️ " + e.message, "error");
+    sendBtn.disabled = false;
+  }
+});
+
+refreshStats();
+refreshDocuments();
+</script>
+</body>
+</html>

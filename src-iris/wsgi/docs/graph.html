@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WikiGraph — knowledge constellation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,50&family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<style>
+:root {
+  /* InterSystems palette, matching index.html */
+  --paper: #eef3f9;
+  --paper-deep: #e1eaf3;
+  --ink: #2f2a95;
+  --oxblood: #00b2a9;
+  --oxblood-bright: #00ccc2;
+  --gold: #00a9c7;
+  --rule: rgba(17, 43, 77, .25);
+  --card: #ffffff;
+  --shadow: 0 2px 0 rgba(17,43,77,.06), 0 18px 40px -22px rgba(17,43,77,.45);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: "Newsreader", Georgia, serif;
+  color: var(--ink);
+  overflow: hidden;
+  background:
+    radial-gradient(1200px 500px at 80% -10%, rgba(0,169,199,.12), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgba(0,133,202,.12), transparent 55%),
+    var(--paper);
+}
+
+/* top bar — like index.html header */
+.bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+  display: flex; align-items: center; gap: 1rem;
+  padding: .85rem 1.4rem; background: #ffffff; border-bottom: 1.5px solid var(--rule);
+}
+h1 {
+  font-family: "Newsreader", Georgia, serif; font-weight: bolder;
+  font-size: 1.45rem; letter-spacing: -.02em; line-height: 1;
+}
+h1 .wiki { color: var(--ink); }
+h1 .graph { color: var(--oxblood); font-style: italic; }
+.tagline { font-variant: small-caps; letter-spacing: .18em; color: var(--ink); font-size: .76rem; margin-left: .1rem; }
+.spacer { flex: 1; }
+.stat { font-variant: small-caps; letter-spacing: .1em; color: var(--ink); font-size: .82rem; }
+.stat b { color: var(--oxblood); font-style: normal; }
+
+/* pill controls — like index.html langToggle */
+.seg { display: inline-flex; border: 1.5px solid var(--ink); border-radius: 999px; overflow: hidden; background: var(--card); box-shadow: 2px 2px 0 rgba(17,43,77,.2); }
+.seg button, .pill {
+  font-family: "Fraunces", serif; font-size: .78rem; font-weight: 700; letter-spacing: .06em;
+  padding: .36rem .85rem; border: 0; background: transparent; color: var(--ink); cursor: pointer; transition: all .18s ease;
+}
+.seg button.on { background: var(--oxblood); color: var(--card); }
+.seg button:not(.on):hover { color: var(--ink); }
+.pill { border: 1.5px solid var(--ink); border-radius: 999px; background: var(--card); box-shadow: 2px 2px 0 rgba(17,43,77,.2); }
+.pill:hover { color: var(--ink); }
+.pill.on { background: var(--oxblood); color: var(--card); }
+.pill:active, .seg button:active { transform: translateY(1px); }
+@media (max-width: 760px) { .tagline, .stat { display: none; } }
+
+svg#sky { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+svg#sky:active { cursor: grabbing; }
+
+.link { stroke: rgba(17,43,77,.75); stroke-opacity: .5; }
+.link.hot { stroke: var(--oxblood); }
+.node { cursor: pointer; transition: opacity .2s; }
+.node circle { stroke: #ffffff; stroke-width: 1; }
+.node.dim { opacity: .12; }
+.label {
+  font-family: "Newsreader", Georgia, serif; font-size: 14px; font-weight: 600; fill: var(--ink);
+  pointer-events: none; text-anchor: middle; opacity: 0; transition: opacity .2s;
+  paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round;
+}
+.label.show { opacity: 1; }
+/* relationship (edge) labels — the predicates that created each line */
+.elabel {
+  font-family: "Newsreader", Georgia, serif; font-style: italic; font-size: 11px; fill: rgba(17,43,77,.75);
+  pointer-events: none; text-anchor: middle;
+  paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round;
+}
+
+/* floating cards */
+.card { background: var(--card); border: 1.5px solid var(--rule); border-radius: 14px; box-shadow: var(--shadow); }
+#tip {
+  position: fixed; z-index: 30; pointer-events: none; opacity: 0; transition: opacity .12s; max-width: 260px;
+  padding: .55rem .75rem;
+}
+#tip .n { font-family: "Newsreader", serif; font-weight: bolder; font-size: 1.05rem; color: var(--ink); line-height: 1.15; }
+#tip .m { font-size: .85rem; color: var(--ink); margin-top: .2rem; }
+#tip .sw { display: inline-block; width: 9px; height: 9px; border-radius: 99px; margin-right: .35rem; }
+
+/* legend */
+#legend { position: fixed; left: 1.1rem; bottom: 1.1rem; z-index: 20; width: max-content; max-height: 50vh; overflow: auto; padding: .8rem .9rem; }
+#legend .h { font-variant: small-caps; letter-spacing: .14em; color: var(--ink); font-size: .78rem; margin-bottom: .15rem; }
+#legend .hint { font-size: .76rem; color: var(--ink); font-style: italic; margin-bottom: .5rem; opacity: .8; }
+.leg { display: flex; align-items: center; gap: .55rem; font-size: .92rem; color: var(--ink);
+  padding: .26rem .4rem; cursor: pointer; border-radius: 8px; user-select: none; }
+.leg:hover { background: var(--paper-deep); color: var(--ink); }
+.leg.sel { background: rgba(0,178,169,.14); color: var(--ink); font-weight: 600; }
+.leg .sw { width: 13px; height: 13px; border-radius: 99px; flex: none; box-shadow: 0 0 0 1.5px #fff, 0 1px 3px rgba(17,43,77,.4); }
+.leg.sel .sw { box-shadow: 0 0 0 2px var(--oxblood), 0 1px 3px rgba(17,43,77,.4); }
+#legend .legActions { display: flex; gap: 1.1rem; align-items: center; margin-top: .5rem; }
+#legend .lbtn { font-family: "Fraunces", serif; font-size: .72rem; font-weight: 700; letter-spacing: .05em; color: var(--oxblood);
+  background: 0; border: 0; cursor: pointer; padding: .2rem 0; }
+#legend .lbtn:hover { text-decoration: underline; }
+#legend .clear { display: none; }
+#legend .clear.show { display: inline; }
+
+/* info panel */
+#info { position: fixed; right: 1.1rem; top: 4.6rem; z-index: 20; width: 300px; max-height: 80vh; overflow: auto; padding: 1rem 1.1rem;
+  transform: translateX(360px); transition: transform .28s cubic-bezier(.4,0,.2,1); }
+#info.open { transform: none; }
+#info .close { float: right; color: var(--ink); background: 0; border: 0; font-size: 1.3rem; cursor: pointer; line-height: 1; }
+#info .nm { font-family: "Newsreader", serif; font-weight: bolder; font-size: 1.5rem; color: var(--ink); line-height: 1.1; padding-right: 1.4rem; }
+#info .ty { font-size: .9rem; color: var(--ink); margin: .35rem 0 .8rem; }
+#info .ty .sw { display: inline-block; width: 10px; height: 10px; border-radius: 99px; margin-right: .4rem; }
+#info h4 { font-variant: small-caps; letter-spacing: .12em; color: var(--ink); font-size: .8rem; font-weight: 400;
+  margin: .9rem 0 .4rem; border-top: 1px solid var(--rule); padding-top: .7rem; }
+#info .rel { font-size: .92rem; color: var(--ink); line-height: 1.55; padding: .12rem 0; }
+#info .rel .p { color: var(--gold); font-style: italic; }
+#info .rel .o { color: var(--oxblood); cursor: pointer; font-weight: 600; }
+#info .rel .o:hover { text-decoration: underline; }
+
+#loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: .8rem; z-index: 40;
+  font-variant: small-caps; letter-spacing: .12em; color: var(--ink); font-size: 1rem; }
+#loading .dot { width: 8px; height: 8px; border-radius: 99px; background: var(--oxblood); animation: pulse 1.1s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: .3; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.3); } }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div>
+    <h1><span class="wiki">Wiki</span><span class="graph">Graph</span></h1>
+    <div class="tagline">knowledge constellation</div>
+  </div>
+  <div class="spacer"></div>
+  <span class="stat" id="stat"></span>
+  <button class="pill" id="refresh" title="Reload the graph data">&#8635; refresh</button>
+  <button class="pill" id="relToggle">relations</button>
+  <div class="seg" id="colorMode">
+    <button data-mode="doc" class="on">by article</button>
+    <button data-mode="type">by type</button>
+  </div>
+  <div class="seg" id="langMode" title="Show one language's graph">
+    <button data-lang="en">EN</button>
+    <button data-lang="pt">PT</button>
+  </div>
+</div>
+
+<svg id="sky"></svg>
+<div id="tip" class="card"></div>
+
+<div id="legend" class="card">
+  <div class="h" id="legendHead">articles</div>
+  <div class="hint">click to highlight &middot; pick several</div>
+  <div id="legendBody"></div>
+  <div class="legActions">
+    <button class="lbtn" id="legendAll">select all</button>
+    <button class="lbtn clear" id="legendClear">clear selection</button>
+  </div>
+</div>
+
+<div id="info" class="card">
+  <button class="close" onclick="closeInfo()">&times;</button>
+  <div class="nm" id="infoName"></div>
+  <div class="ty" id="infoType"></div>
+  <div id="infoBody"></div>
+</div>
+
+<div id="loading"><div class="dot"></div><span>mapping the constellation…</span></div>
+
+<script>
+// distinct, saturated hues that read on the light paper background
+const PALETTE = ["#2f2a95","#00a99d","#d98a00","#c8553d","#2e7d32","#7b3fb3","#0277bd","#ad1457",
+                 "#5d7a00","#9c4a1a","#00838f","#6a1b9a","#1565c0","#b08900","#3949ab","#00695c"];
+const apiBase = location.pathname.replace(/docs\/[^\/]*$/, "");
+// the parent passes ?lang=en|pt so the constellation shows only that language's graph
+const graphLang = new URLSearchParams(location.search).get("lang") || "";
+const graphUrl = apiBase + "api/graph" + (graphLang ? "?lang=" + graphLang : "");
+
+const svg = d3.select("#sky");
+const g = svg.append("g");
+const linkG = g.append("g");
+const edgeLabelG = g.append("g");
+const nodeG = g.append("g");
+const tip = document.getElementById("tip");
+
+let nodes=[], links=[], drawLinks=[], adj={}, byId={}, docTitle={}, colorMode="doc", colorFn, sim;
+let selected = null;                 // a focused entity id (from clicking a node)
+const activeGroups = new Set();      // multi-selected legend groups
+let showLabels = false;               // relationship (edge) labels on/off - matches the relToggle button's default "off" state
+function size(){ return [window.innerWidth, window.innerHeight]; }
+function radius(n){ return 4 + Math.sqrt(n.degree||0)*3; }
+function groupKey(n){ return colorMode==="doc" ? (n.doc==null ? "—" : n.doc) : n.type; }
+function nodeColor(n){ return colorFn(groupKey(n)); }
+function gk(n){ return String(groupKey(n)); }
+
+async function loadGraph(){
+  const loading = document.getElementById("loading");
+  loading.style.display="flex";
+  let data;
+  try { data = await (await fetch(graphUrl, {cache:"no-store"})).json(); }
+  catch(e){ loading.innerHTML = "<span>could not load the graph</span>"; return; }
+
+  // reset state so add/delete changes are reflected on a clean rebuild
+  if(sim) sim.stop();
+  selected=null; activeGroups.clear(); closeInfo();
+  adj={}; byId={}; docTitle={};
+
+  nodes = data.nodes;
+  const ids = new Set(nodes.map(n=>n.id));
+  // ALL valid relations - the adjacency / info card must list every relation between entities.
+  links = (data.links||[]).filter(l=> ids.has(l.source) && ids.has(l.target));
+  // deduped to the FIRST relation per node pair - used only for DRAWING/layout, so multiple
+  // relations between the same two entities don't draw overlapping lines and stacked labels.
+  const seenPairs = new Set();
+  drawLinks = links.filter(l=>{
+    const key = l.source < l.target ? l.source+"|"+l.target : l.target+"|"+l.source;
+    if(seenPairs.has(key)) return false;
+    seenPairs.add(key);
+    return true;
+  });
+  (data.documents||[]).forEach(d=> docTitle[d.id]=d.title);
+
+  const deg = {};
+  drawLinks.forEach(l=>{ deg[l.source]=(deg[l.source]||0)+1; deg[l.target]=(deg[l.target]||0)+1; });
+  nodes.forEach(n=> n.degree = deg[n.id]||0);
+  nodes.forEach(n=> adj[n.id]=[]);
+  links.forEach(l=>{ adj[l.source].push({id:l.target, predicate:l.predicate, dir:"out"});
+                     adj[l.target].push({id:l.source, predicate:l.predicate, dir:"in"}); });
+  nodes.forEach(n=> byId[n.id]=n);
+
+  buildColors();
+  draw();
+  buildLegend();
+  document.getElementById("stat").innerHTML =
+    "<b>"+nodes.length+"</b> entities &middot; <b>"+links.length+"</b> relations &middot; <b>"+(data.documents||[]).length+"</b> articles";
+  loading.style.display="none";
+}
+
+(function init(){ defsSetup(); loadGraph(); })();
+
+function buildColors(){
+  const keys = colorMode==="doc"
+    ? [...new Set(nodes.map(n=> n.doc==null?"—":n.doc))]
+    : [...new Set(nodes.map(n=>n.type))].sort();
+  colorFn = d3.scaleOrdinal().domain(keys).range(PALETTE);
+}
+
+function defsSetup(){
+  const defs = svg.append("defs");
+  const f = defs.append("filter").attr("id","soft").attr("x","-50%").attr("y","-50%").attr("width","200%").attr("height","200%");
+  f.append("feDropShadow").attr("dx",0).attr("dy",1).attr("stdDeviation",1.4)
+    .attr("flood-color","#112b4d").attr("flood-opacity",.4);
+}
+
+function draw(){
+  const [w,h]=size();
+  svg.attr("viewBox",[0,0,w,h]);
+
+  const link = linkG.selectAll("line").data(drawLinks).join("line").attr("class","link");
+
+  const edgeLabel = edgeLabelG.selectAll("text").data(drawLinks).join("text")
+    .attr("class","elabel").text(d=>d.predicate);
+
+  const node = nodeG.selectAll("g.node").data(nodes,d=>d.id).join(enter=>{
+    const gN = enter.append("g").attr("class","node");
+    gN.append("circle").attr("filter","url(#soft)");
+    gN.append("text").attr("class","label");
+    return gN;
+  });
+  node.select("circle").attr("r",d=>radius(d)).attr("fill",d=>nodeColor(d));
+  node.select("text").text(d=>d.name).attr("y",d=>-radius(d)-4);
+  node.on("mouseover",(e,d)=>showTip(e,d)).on("mousemove",e=>moveTip(e))
+      .on("mouseout",hideTip).on("click",(e,d)=>{e.stopPropagation();selectNode(d);});
+  node.call(d3.drag().on("start",dragStart).on("drag",dragged).on("end",dragEnd));
+
+  sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(drawLinks).id(d=>d.id).distance(d=> 110 + (d.source.degree||0)*4).strength(.5))
+    .force("charge", d3.forceManyBody().strength(-300))
+    .force("center", d3.forceCenter(w/2,h/2))
+    .force("collide", d3.forceCollide().radius(d=>radius(d)+25))
+    .force("x", d3.forceX(w/2).strength(.04)).force("y", d3.forceY(h/2).strength(.08))
+    .on("tick",()=>{
+      link.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y).attr("x2",d=>d.target.x).attr("y2",d=>d.target.y);
+      edgeLabel.attr("transform",d=>{
+        const mx=(d.source.x+d.target.x)/2, my=(d.source.y+d.target.y)/2;
+        let a=Math.atan2(d.target.y-d.source.y, d.target.x-d.source.x)*180/Math.PI;
+        if(a>90||a<-90) a+=180;
+        return `translate(${mx},${my}) rotate(${a}) translate(0,-3)`;
+      });
+      node.attr("transform",d=>`translate(${d.x},${d.y})`);
+    });
+
+  svg.call(d3.zoom().scaleExtent([.2,10]).on("zoom",e=> g.attr("transform",e.transform)));
+  svg.on("click",clearAll);
+  applyHighlight();
+}
+
+/* ---- the single source of truth for what is emphasised ---- */
+function applyHighlight(){
+  let keep = null;
+  if(selected!=null){ keep=new Set([selected]); adj[selected].forEach(a=>keep.add(a.id)); }
+  const hasG = activeGroups.size>0;
+
+  nodeG.selectAll("g.node").classed("dim", n=>{
+    if(selected!=null) return !keep.has(n.id);
+    if(hasG) return !activeGroups.has(gk(n));
+    return false;
+  });
+  nodeG.selectAll("g.node text").classed("show", n=>{
+    if(selected!=null) return keep.has(n.id);
+    if(hasG) return activeGroups.has(gk(n));
+    return n.degree>=3;
+  });
+  linkG.selectAll("line")
+    .classed("hot", l=> selected!=null && (l.source.id===selected||l.target.id===selected))
+    .style("stroke-opacity", l=>{
+      if(selected!=null) return (l.source.id===selected||l.target.id===selected)?.85:.05;
+      if(hasG){ const a=activeGroups.has(gk(l.source)), b=activeGroups.has(gk(l.target));
+                return (a&&b)?.6 : ((a||b)?.12 : .04); }
+      return null;
+    });
+  edgeLabelG.selectAll("text").style("opacity", l=>{
+    if(!showLabels) return 0;
+    if(selected!=null) return (l.source.id===selected||l.target.id===selected)?1:0;
+    if(hasG){ return (activeGroups.has(gk(l.source))&&activeGroups.has(gk(l.target)))?1:0; }
+    return .95;
+  });
+  document.getElementById("legendClear").classList.toggle("show", hasG);
+}
+
+/* ---- node focus ---- */
+function selectNode(d){
+  selected=d.id; activeGroups.clear(); syncLegend();
+  applyHighlight(); openInfo(d);
+}
+function clearAll(){
+  selected=null; activeGroups.clear(); syncLegend();
+  applyHighlight(); closeInfo();
+}
+
+/* ---- tooltip ---- */
+function showTip(e,d){
+  tip.innerHTML = '<div class="n">'+esc(d.name)+'</div><div class="m"><span class="sw" style="background:'+nodeColor(d)+'"></span>'+
+    esc(d.type)+' &middot; '+d.degree+' link'+(d.degree===1?'':'s')+'<br>'+esc(d.docTitle||'—')+'</div>';
+  tip.style.opacity=1; moveTip(e);
+}
+function moveTip(e){ const o=15; let x=e.clientX+o,y=e.clientY+o;
+  if(x>window.innerWidth-280)x=e.clientX-280; if(y>window.innerHeight-90)y=e.clientY-90;
+  tip.style.left=x+"px"; tip.style.top=y+"px"; }
+function hideTip(){ tip.style.opacity=0; }
+
+/* ---- info panel ---- */
+function openInfo(d){
+  document.getElementById("infoName").textContent=d.name;
+  document.getElementById("infoType").innerHTML='<span class="sw" style="background:'+nodeColor(d)+'"></span>'+esc(d.type)+' &middot; '+esc(d.docTitle||'—');
+  const rels=adj[d.id];
+  let html = rels.length? '<h4>'+rels.length+' relation'+(rels.length===1?'':'s')+'</h4>' : '<h4>no relations</h4>';
+  rels.forEach(a=>{ const o=byId[a.id];
+    html += '<div class="rel">'+ (a.dir==="out"?'':'&larr; ') +'<span class="p">'+esc(a.predicate)+'</span>'+(a.dir==="out"?' &rarr; ':' ')+
+            '<span class="o" data-id="'+a.id+'">'+esc(o?o.name:a.id)+'</span></div>'; });
+  document.getElementById("infoBody").innerHTML=html;
+  document.querySelectorAll("#infoBody .o").forEach(el=> el.onclick=()=>{ const n=byId[+el.dataset.id]; if(n) selectNode(n); });
+  document.getElementById("info").classList.add("open");
+}
+function closeInfo(){ document.getElementById("info").classList.remove("open"); }
+
+/* ---- legend (multi-select) ---- */
+function buildLegend(){
+  document.getElementById("legendHead").textContent = colorMode==="doc" ? "articles" : "entity types";
+  const body=document.getElementById("legendBody"); body.innerHTML="";
+  colorFn.domain().forEach(k=>{
+    const label = colorMode==="doc" ? (k==="—"?"— (no article)":(docTitle[k]||("doc "+k))) : k;
+    const row=document.createElement("div"); row.className="leg"; row.dataset.key=String(k);
+    row.innerHTML='<span class="sw" style="background:'+colorFn(k)+'"></span>'+esc(label);
+    row.onclick=()=>toggleGroup(String(k));
+    body.appendChild(row);
+  });
+  syncLegend();
+}
+function toggleGroup(k){
+  selected=null; closeInfo();
+  if(activeGroups.has(k)) activeGroups.delete(k); else activeGroups.add(k);
+  syncLegend(); applyHighlight();
+}
+function syncLegend(){
+  document.querySelectorAll("#legendBody .leg").forEach(r=> r.classList.toggle("sel", activeGroups.has(r.dataset.key)));
+  document.getElementById("legendClear").classList.toggle("show", activeGroups.size>0);
+}
+function selectAllGroups(){
+  selected=null; closeInfo();
+  colorFn.domain().forEach(k=> activeGroups.add(String(k)));
+  syncLegend(); applyHighlight();
+}
+document.getElementById("legendAll").onclick=selectAllGroups;
+document.getElementById("legendClear").onclick=clearAll;
+
+/* ---- controls ---- */
+// language toggle: reload the constellation scoped to the chosen language (?lang=en|pt)
+document.querySelectorAll("#langMode button").forEach(b=>{
+  if(b.dataset.lang===graphLang) b.classList.add("on");
+  b.onclick=()=>{
+    if(b.dataset.lang===graphLang) return;
+    // embedded in the app: switch the whole app's language so the header stays in sync
+    // (it reloads this iframe for the new language). standalone: just reload ourselves.
+    if(window.parent!==window && typeof window.parent.setLang==="function"){
+      window.parent.setLang(b.dataset.lang);
+    } else {
+      const params=new URLSearchParams(location.search);
+      params.set("lang",b.dataset.lang);
+      location.search=params.toString();   // reloads graph.html with the new language
+    }
+  };
+});
+document.querySelectorAll("#colorMode button").forEach(b=> b.onclick=()=>{
+  document.querySelectorAll("#colorMode button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); colorMode=b.dataset.mode;
+  buildColors();
+  nodeG.selectAll("g.node circle").transition().duration(400).attr("fill",d=>nodeColor(d));
+  selected=null; activeGroups.clear(); buildLegend(); closeInfo(); applyHighlight();
+});
+document.getElementById("relToggle").onclick=function(){
+  showLabels=!showLabels; this.classList.toggle("on",showLabels); applyHighlight();
+};
+document.getElementById("refresh").onclick=function(){
+  // re-fetch /api/graph so articles added or deleted since load show up
+  this.disabled=true; const btn=this;
+  loadGraph().finally(()=>{ btn.disabled=false; });
+};
+window.addEventListener("resize",()=>{ const [w,h]=size(); svg.attr("viewBox",[0,0,w,h]);
+  if(sim){ sim.force("center",d3.forceCenter(w/2,h/2)); sim.alpha(.3).restart(); } });
+
+/* ---- drag ---- */
+function dragStart(e,d){ if(!e.active) sim.alphaTarget(.3).restart(); d.fx=d.x; d.fy=d.y; }
+function dragged(e,d){ d.fx=e.x; d.fy=e.y; }
+function dragEnd(e,d){ if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }
+
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+</script>
+</body>
+</html>

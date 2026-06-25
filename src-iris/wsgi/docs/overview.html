@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WikiGraph — a self-growing Wikipedia GraphRAG chatbot on InterSystems IRIS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..700&family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#ffffff;
+  --paper:#eef3f9;
+  --paper-edge:#e1eaf3;
+  --ink:#2b2950;
+  --ink-soft:#5d5a82;
+  --indigo:#2f2a95;
+  --indigo-deep:#1f1b66;
+  --teal:#00b2a9;
+  --teal-deep:#00756e;
+  --coral:#c8553d;
+  --line:rgba(47,42,149,.15);
+  --line-strong:rgba(47,42,149,.30);
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:"Newsreader",Georgia,serif;
+  background:var(--bg);
+  color:var(--ink);
+  font-size:18px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+::selection{background:var(--teal);color:#fff}
+
+/* faint knowledge-graph grid behind everything */
+body::before{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:radial-gradient(circle at 1px 1px, rgba(47,42,149,.10) 1px, transparent 0);
+  background-size:34px 34px;
+}
+.wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 2rem}
+
+/* ---------- top bar ---------- */
+.topbar{position:sticky;top:0;z-index:20;background:#ffffff;border-bottom:1px solid var(--line)}
+.topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:56px}
+.brand{display:flex;align-items:center;gap:.55rem;font-family:var(--mono);font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:var(--indigo)}
+.brand .glyph{width:16px;height:16px}
+.nav{display:flex;gap:1.3rem;font-family:var(--mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase}
+.nav a{color:var(--ink-soft);text-decoration:none;transition:color .2s}
+.nav a:hover{color:var(--teal-deep)}
+@media(max-width:820px){.nav{display:none}}
+
+/* ---------- reveal ---------- */
+.reveal{opacity:0;transform:translateY(22px);transition:opacity .8s cubic-bezier(.2,.7,.2,1),transform .8s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+
+/* ---------- hero ---------- */
+.hero{padding:5rem 0 3.5rem;position:relative}
+.eyebrow{font-family:var(--mono);font-size:.74rem;letter-spacing:.24em;text-transform:uppercase;color:var(--teal-deep);display:flex;align-items:center;gap:.7rem}
+.eyebrow::before{content:"";width:34px;height:1px;background:var(--teal)}
+h1{font-family:"Fraunces",serif;font-weight:600;font-size:clamp(3.2rem,11vw,8rem);line-height:.92;letter-spacing:-.03em;color:var(--indigo);margin:.5rem 0 .1rem}
+h1 .self{font-style:italic;font-weight:340;color:var(--teal-deep)}
+.lede{font-size:clamp(1.15rem,2.4vw,1.55rem);line-height:1.5;max-width:40ch;color:var(--ink);margin-top:1.2rem}
+.lede b{color:var(--indigo);font-weight:500}
+.metas{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.8rem}
+.tag{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;color:var(--indigo);border:1px solid var(--line-strong);border-radius:999px;padding:.34rem .8rem;background:color-mix(in srgb,var(--paper) 60%,transparent)}
+
+.constellation{position:absolute;top:1rem;right:0.5rem;width:min(38%,380px);opacity:.9;pointer-events:none}
+@media(max-width:860px){.constellation{position:static;width:100%;margin:2.4rem 0 -1rem;opacity:1}}
+.edge{stroke:var(--indigo);stroke-opacity:.28;stroke-width:1;fill:none;stroke-dasharray:6 6;animation:dashflow 9s linear infinite}
+@keyframes dashflow{to{stroke-dashoffset:-120}}
+.node{fill:var(--paper);stroke:var(--indigo);stroke-width:1.4}
+.node.hot{fill:var(--teal);stroke:var(--teal-deep)}
+.node-pulse{transform-origin:center;animation:pulse 3.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{r:6}50%{r:8.5}}
+
+/* ---------- section frame ---------- */
+section{padding:3.4rem 0;border-top:1px solid var(--line)}
+.kicker{font-family:var(--mono);font-size:.74rem;letter-spacing:.2em;text-transform:uppercase;color:var(--teal-deep);display:flex;align-items:center;gap:.6rem;margin-bottom:1.1rem}
+.kicker .no{color:var(--ink-soft)}
+h2{font-family:"Fraunces",serif;font-weight:500;font-size:clamp(1.9rem,4.6vw,3.1rem);line-height:1.04;letter-spacing:-.02em;color:var(--indigo);max-width:22ch}
+.section-lede{max-width:64ch;color:var(--ink-soft);margin-top:.9rem;font-size:1.08rem}
+code,.m{font-family:var(--mono);font-size:.82em;color:var(--teal-deep);background:color-mix(in srgb,var(--teal) 12%,transparent);padding:.08em .4em;border-radius:5px;white-space:nowrap}
+
+/* ---------- tuning tables ---------- */
+.tune-h{font-family:"Fraunces",serif;font-weight:600;font-size:1.35rem;color:var(--indigo);margin:2.4rem 0 .1rem}
+.tune-h:first-of-type{margin-top:1.6rem}
+.tune-h .g{font-family:var(--mono);font-weight:400;font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--teal-deep);margin-left:.6rem}
+.tune{margin-top:.7rem;overflow-x:auto;border:1px solid var(--line);border-radius:14px}
+.tune table{width:100%;border-collapse:collapse;font-size:.92rem;min-width:600px}
+.tune th,.tune td{text-align:left;padding:.62rem .9rem;border-top:1px solid var(--line);vertical-align:top}
+.tune thead th{font-family:var(--mono);font-size:.64rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);font-weight:500;border-top:0;background:var(--paper)}
+.tune tbody tr:hover td{background:color-mix(in srgb,var(--teal) 6%,transparent)}
+.tune .prop{font-family:var(--mono);font-size:.82rem;color:var(--indigo);white-space:nowrap}
+.tune .def{font-family:var(--mono);font-size:.82rem;color:var(--teal-deep);white-space:nowrap}
+.tune td.what{color:var(--ink-soft)}
+.tune td.ideal{color:var(--ink)}
+.tune b{color:var(--indigo);font-weight:500}
+.tune-note{margin-top:.9rem;font-size:.96rem;color:var(--ink-soft)}
+
+/* ---------- the loop ---------- */
+.loop{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-top:2rem;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+@media(max-width:780px){.loop{grid-template-columns:repeat(2,1fr)}}
+.step{background:var(--paper);padding:1.6rem 1.3rem 1.7rem;position:relative;transition:background .3s}
+.step:hover{background:#fff}
+.step .n{font-family:"Fraunces",serif;font-style:italic;font-size:2.6rem;color:var(--teal);line-height:1}
+.step h3{font-family:"Fraunces",serif;font-weight:600;font-size:1.35rem;color:var(--indigo);margin:.5rem 0 .35rem}
+.step p{font-size:.97rem;color:var(--ink-soft);line-height:1.5}
+
+/* ---------- architecture ---------- */
+.diagram{margin-top:2rem;background:var(--paper);border:1px solid var(--line-strong);border-radius:16px;padding:1.6rem 1.2rem .8rem}
+.diagram svg{width:100%;height:auto;display:block}
+.dlabel{font-family:var(--mono);font-size:11.5px;letter-spacing:.02em}
+.legend{display:flex;flex-wrap:wrap;gap:1.1rem;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--line);font-family:var(--mono);font-size:.7rem;letter-spacing:.05em;color:var(--ink-soft);text-transform:uppercase}
+.legend span{display:flex;align-items:center;gap:.45rem}
+.swatch{width:11px;height:11px;border-radius:3px}
+
+/* ---------- lifecycle ---------- */
+.flow{display:flex;align-items:stretch;gap:.6rem;flex-wrap:wrap;margin-top:2rem}
+.phase{flex:1 1 160px;background:var(--paper);border:1px solid var(--line-strong);border-radius:12px;padding:1.1rem 1.2rem;position:relative}
+.phase .ph{font-family:var(--mono);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--teal-deep)}
+.phase h4{font-family:"Fraunces",serif;font-weight:600;font-size:1.2rem;color:var(--indigo);margin:.3rem 0}
+.phase p{font-size:.9rem;color:var(--ink-soft);line-height:1.45}
+.phase .bar{position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:12px 0 0 12px;background:var(--teal)}
+
+/* ---------- two-up ---------- */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:2rem}
+@media(max-width:760px){.two{grid-template-columns:1fr}}
+.panel{background:var(--paper);border:1px solid var(--line-strong);border-radius:14px;padding:1.4rem 1.5rem}
+.panel h4{font-family:"Fraunces",serif;font-weight:600;font-size:1.3rem;color:var(--indigo);margin-bottom:.5rem}
+.panel.win{border-left:4px solid var(--teal)}
+.panel.lose{border-left:4px solid var(--coral)}
+.panel p{font-size:.98rem;color:var(--ink-soft)}
+.panel .lbl{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);display:block;margin-bottom:.5rem}
+
+/* ---------- schema cards ---------- */
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:2rem}
+@media(max-width:880px){.cards{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.cards{grid-template-columns:1fr}}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:1.25rem 1.35rem;transition:transform .25s,box-shadow .25s,border-color .25s}
+.card:hover{transform:translateY(-3px);box-shadow:0 16px 34px -22px rgba(47,42,149,.5);border-color:var(--line-strong)}
+.card .ct{display:flex;align-items:center;gap:.55rem;font-family:var(--mono);font-size:.9rem;color:var(--indigo);letter-spacing:.01em}
+.dot{width:10px;height:10px;border-radius:999px;flex:none}
+.card p{margin-top:.5rem;font-size:.94rem;color:var(--ink-soft);line-height:1.48}
+
+/* ---------- modules / files ---------- */
+.files{margin-top:2rem;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.file{display:grid;grid-template-columns:200px 1fr;gap:1rem;padding:1rem 1.3rem;border-top:1px solid var(--line);background:var(--paper);align-items:baseline}
+.file:first-child{border-top:0}
+.file .fn{font-family:var(--mono);font-size:.85rem;color:var(--teal-deep)}
+.file p{font-size:.96rem;color:var(--ink-soft)}
+@media(max-width:620px){.file{grid-template-columns:1fr;gap:.25rem}}
+
+/* ---------- decisions ---------- */
+.decisions{margin-top:2rem;display:flex;flex-direction:column;gap:0}
+.dec{display:grid;grid-template-columns:auto 1fr;gap:1.4rem;padding:1.5rem 0;border-top:1px solid var(--line)}
+.dec:first-child{border-top:0}
+.dec .tag2{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--teal-deep);padding-top:.35rem;white-space:nowrap}
+.dec h4{font-family:"Fraunces",serif;font-weight:600;font-size:1.3rem;color:var(--indigo);margin-bottom:.3rem;line-height:1.15}
+.dec p{font-size:1.02rem;color:var(--ink-soft)}
+@media(max-width:680px){.dec{grid-template-columns:1fr;gap:.4rem}}
+
+/* ---------- stack ---------- */
+.chips{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:1.8rem}
+.chip{font-family:var(--mono);font-size:.8rem;color:var(--indigo);background:var(--paper);border:1px solid var(--line-strong);border-radius:8px;padding:.5rem .85rem;transition:.2s}
+.chip:hover{border-color:var(--teal);color:var(--teal-deep)}
+.chip b{color:var(--teal-deep);font-weight:500}
+
+/* ---------- run strip ---------- */
+.run{margin-top:2rem;background:var(--indigo);border-radius:16px;padding:1.7rem 1.8rem;color:#eaeaff}
+.run .lbl{font-family:var(--mono);font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:#a9a4ee}
+.run pre{font-family:var(--mono);font-size:.86rem;line-height:1.7;color:#fff;margin:.6rem 0 .2rem;white-space:pre-wrap;word-break:break-word}
+.run .url{font-family:var(--mono);font-size:.86rem;color:var(--teal);margin-top:.6rem}
+
+footer{border-top:1px solid var(--line-strong);padding:2.6rem 0 3.4rem;margin-top:1rem}
+footer .wrap{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:1rem;font-family:var(--mono);font-size:.74rem;letter-spacing:.06em;color:var(--ink-soft)}
+footer b{font-family:"Fraunces",serif;font-style:italic;font-size:1.4rem;color:var(--indigo)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <div class="brand">
+      <svg class="glyph" viewBox="0 0 24 24"><g fill="none" stroke="#2f2a95" stroke-width="1.4"><path d="M5 6 L18 4 M5 6 L9 17 M18 4 L9 17 M18 4 L20 14 M9 17 L20 14"/></g><g fill="#00b2a9"><circle cx="5" cy="6" r="2.2"/><circle cx="18" cy="4" r="2.2"/><circle cx="9" cy="17" r="2.2"/><circle cx="20" cy="14" r="2.2"/></g></svg>
+      WikiGraph
+    </div>
+    <nav class="nav">
+      <a href="#idea">idea</a>
+      <a href="#arch">architecture</a>
+      <a href="#flow">flow</a>
+      <a href="#retrieval">retrieval</a>
+      <a href="#graph">knowledge</a>
+      <a href="#tuning">tuning</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero">
+  <div class="wrap">
+    <svg class="constellation" viewBox="0 0 440 380" aria-hidden="true">
+      <g>
+        <line class="edge" x1="70" y1="60" x2="210" y2="40"/>
+        <line class="edge" x1="210" y1="40" x2="360" y2="90"/>
+        <line class="edge" x1="70" y1="60" x2="120" y2="200"/>
+        <line class="edge" x1="210" y1="40" x2="230" y2="190"/>
+        <line class="edge" x1="120" y1="200" x2="230" y2="190"/>
+        <line class="edge" x1="230" y1="190" x2="360" y2="240"/>
+        <line class="edge" x1="360" y1="90" x2="360" y2="240"/>
+        <line class="edge" x1="120" y1="200" x2="190" y2="320"/>
+        <line class="edge" x1="360" y1="240" x2="270" y2="330"/>
+        <line class="edge" x1="190" y1="320" x2="270" y2="330"/>
+      </g>
+      <g>
+        <circle class="node" cx="70" cy="60" r="6"/>
+        <circle class="node hot node-pulse" cx="210" cy="40" r="7"/>
+        <circle class="node" cx="360" cy="90" r="6"/>
+        <circle class="node hot" cx="120" cy="200" r="6"/>
+        <circle class="node node-pulse" cx="230" cy="190" r="7"/>
+        <circle class="node" cx="360" cy="240" r="6"/>
+        <circle class="node hot" cx="190" cy="320" r="6"/>
+        <circle class="node" cx="270" cy="330" r="6"/>
+      </g>
+    </svg>
+
+    <p class="eyebrow">InterSystems IRIS · GraphRAG · pyprod</p>
+    <h1>Wiki<span class="self">Graph</span></h1>
+    <p class="lede">A chatbot whose knowledge <b>grows by itself</b>. Ask it anything — if the answer isn&rsquo;t in its graph yet, it reads the one matching Wikipedia page, turns it into vectors and a web of entities, and answers from there. Everything lives in IRIS.</p>
+    <div class="metas">
+      <span class="tag">self-growing</span>
+      <span class="tag">one page, no link-following</span>
+      <span class="tag">graph-first retrieval</span>
+      <span class="tag">EN / PT</span>
+      <span class="tag">everything lives in IRIS</span>
+    </div>
+  </div>
+</header>
+
+<section id="idea">
+  <div class="wrap reveal">
+    <p class="kicker"><span class="no">01</span> the idea</p>
+    <h2>Knowledge it doesn&rsquo;t have, it goes and learns.</h2>
+    <p class="section-lede">A normal RAG bot can only answer from what was loaded up front. WikiGraph closes the loop: a question it can&rsquo;t answer well becomes a trigger to read, structure, and remember &mdash; so the second time, it&rsquo;s instant.</p>
+    <div class="loop">
+      <div class="step"><div class="n">01</div><h3>ask</h3><p>A question arrives in English or Portuguese through the chat UI.</p></div>
+      <div class="step"><div class="n">02</div><h3>search</h3><p>It resolves the question to known entities and runs a graph-first vector search over what it already has.</p></div>
+      <div class="step"><div class="n">03</div><h3>learn</h3><p>If the score is too low it fetches a single Wikipedia page &mdash; never its links &mdash; and builds the graph from it.</p></div>
+      <div class="step"><div class="n">04</div><h3>answer</h3><p>A local LLM replies using only that graph &mdash; concise, grounded, in the question&rsquo;s language.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="arch">
+  <div class="wrap reveal">
+    <p class="kicker"><span class="no">02</span> architecture</p>
+    <h2>Two containers. One of them does almost everything.</h2>
+    <p class="section-lede">The browser talks to a Flask app hosted <i>inside</i> IRIS over WSGI. It only writes a pending row; a polling service picks it up and an interoperability production &mdash; written in Python with <code>pyprod</code> &mdash; runs the whole pipeline. Ollama serves both the chat model and the embedding model.</p>
+    <div class="diagram">
+      <svg viewBox="0 0 720 470" role="img">
+        <title>WikiGraph architecture</title>
+        <desc>Browser to WSGI app to a pending ChatRequest row, polled by chatService into chatProcess, which orchestrates wikipediaOperation, ingestProcess, knowledgeOperation and llmOperation. These read and write the knowledge graph and call Wikipedia and Ollama.</desc>
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+            <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </marker>
+        </defs>
+
+        <!-- spine -->
+        <g>
+          <rect x="255" y="14" width="210" height="44" rx="9" fill="#f6f8fb" stroke="#2f2a95" stroke-width="1"/>
+          <text class="dlabel" x="360" y="33" text-anchor="middle" fill="#2f2a95" font-weight="500">browser</text>
+          <text class="dlabel" x="360" y="48" text-anchor="middle" fill="#5d5a82">chat UI · EN / PT · ☰ menu</text>
+
+          <rect x="255" y="82" width="210" height="46" rx="9" fill="#f6f8fb" stroke="#2f2a95" stroke-width="1"/>
+          <text class="dlabel" x="360" y="102" text-anchor="middle" fill="#2f2a95" font-weight="500">WSGI app · /wikigraph</text>
+          <text class="dlabel" x="360" y="117" text-anchor="middle" fill="#5d5a82">Flask, hosted in IRIS</text>
+
+          <rect x="255" y="152" width="210" height="46" rx="9" fill="#f6f8fb" stroke="#2f2a95" stroke-width="1" stroke-dasharray="4 3"/>
+          <text class="dlabel" x="360" y="172" text-anchor="middle" fill="#2f2a95" font-weight="500">ChatRequest · pending</text>
+          <text class="dlabel" x="360" y="187" text-anchor="middle" fill="#5d5a82">polled every second</text>
+
+          <rect x="255" y="222" width="210" height="46" rx="9" fill="#2f2a95" stroke="#1f1b66" stroke-width="1"/>
+          <text class="dlabel" x="360" y="242" text-anchor="middle" fill="#fff" font-weight="500">chatService → chatProcess</text>
+          <text class="dlabel" x="360" y="257" text-anchor="middle" fill="#c7c4ef">poll · orchestrate</text>
+        </g>
+        <line x1="360" y1="58" x2="360" y2="80" stroke="#9b98c2" stroke-width="1" marker-end="url(#ar)"/>
+        <line x1="360" y1="128" x2="360" y2="150" stroke="#9b98c2" stroke-width="1" marker-end="url(#ar)"/>
+        <line x1="360" y1="198" x2="360" y2="220" stroke="#00b2a9" stroke-width="1.4" marker-end="url(#ar)"/>
+
+        <!-- ops -->
+        <g>
+          <rect x="40" y="312" width="150" height="60" rx="9" fill="#e3f4f2" stroke="#00b2a9" stroke-width="1"/>
+          <text class="dlabel" x="115" y="338" text-anchor="middle" fill="#00756e" font-weight="500">scrape</text>
+          <text class="dlabel" x="115" y="354" text-anchor="middle" fill="#2f2a95">wikipediaOperation</text>
+
+          <rect x="205" y="312" width="150" height="60" rx="9" fill="#e3f4f2" stroke="#00b2a9" stroke-width="1"/>
+          <text class="dlabel" x="280" y="338" text-anchor="middle" fill="#00756e" font-weight="500">ingest</text>
+          <text class="dlabel" x="280" y="354" text-anchor="middle" fill="#2f2a95">ingestProcess</text>
+
+          <rect x="370" y="312" width="150" height="60" rx="9" fill="#e3f4f2" stroke="#00b2a9" stroke-width="1"/>
+          <text class="dlabel" x="445" y="338" text-anchor="middle" fill="#00756e" font-weight="500">search</text>
+          <text class="dlabel" x="445" y="354" text-anchor="middle" fill="#2f2a95">knowledgeOperation</text>
+
+          <rect x="535" y="312" width="150" height="60" rx="9" fill="#e3f4f2" stroke="#00b2a9" stroke-width="1"/>
+          <text class="dlabel" x="610" y="338" text-anchor="middle" fill="#00756e" font-weight="500">LLM</text>
+          <text class="dlabel" x="610" y="354" text-anchor="middle" fill="#2f2a95">llmOperation</text>
+        </g>
+        <line x1="330" y1="268" x2="125" y2="310" stroke="#9b98c2" stroke-width="1" marker-end="url(#ar)"/>
+        <line x1="345" y1="268" x2="282" y2="310" stroke="#9b98c2" stroke-width="1" marker-end="url(#ar)"/>
+        <line x1="375" y1="268" x2="443" y2="310" stroke="#9b98c2" stroke-width="1" marker-end="url(#ar)"/>
+        <line x1="390" y1="268" x2="600" y2="310" stroke="#9b98c2" stroke-width="1" marker-end="url(#ar)"/>
+
+        <!-- externals -->
+        <g>
+          <rect x="40" y="414" width="190" height="46" rx="9" fill="#f6f8fb" stroke="#5d5a82" stroke-width="1"/>
+          <text class="dlabel" x="135" y="434" text-anchor="middle" fill="#2f2a95" font-weight="500">Wikipedia API</text>
+          <text class="dlabel" x="135" y="449" text-anchor="middle" fill="#5d5a82">one page, no links</text>
+
+          <rect x="262" y="414" width="190" height="46" rx="9" fill="#f6f8fb" stroke="#5d5a82" stroke-width="1"/>
+          <text class="dlabel" x="357" y="434" text-anchor="middle" fill="#2f2a95" font-weight="500">knowledge graph</text>
+          <text class="dlabel" x="357" y="449" text-anchor="middle" fill="#5d5a82">chunks + entities in IRIS</text>
+
+          <rect x="484" y="414" width="200" height="46" rx="9" fill="#f6f8fb" stroke="#5d5a82" stroke-width="1"/>
+          <text class="dlabel" x="584" y="434" text-anchor="middle" fill="#2f2a95" font-weight="500">Ollama container</text>
+          <text class="dlabel" x="584" y="449" text-anchor="middle" fill="#5d5a82">gemma4:e2b · harrier-0.6b</text>
+        </g>
+        <line x1="115" y1="372" x2="130" y2="412" stroke="#00b2a9" stroke-width="1" marker-end="url(#ar)"/>
+        <line x1="280" y1="372" x2="345" y2="412" stroke="#00b2a9" stroke-width="1" marker-end="url(#ar)"/>
+        <line x1="295" y1="372" x2="560" y2="412" stroke="#00b2a9" stroke-width="1" marker-end="url(#ar)"/>
+        <line x1="445" y1="372" x2="370" y2="412" stroke="#00b2a9" stroke-width="1" marker-end="url(#ar)"/>
+        <line x1="610" y1="372" x2="592" y2="412" stroke="#00b2a9" stroke-width="1" marker-end="url(#ar)"/>
+      </svg>
+      <div class="legend">
+        <span><span class="swatch" style="background:#2f2a95"></span>service &amp; orchestration</span>
+        <span><span class="swatch" style="background:#00b2a9"></span>business operations &amp; processes</span>
+        <span><span class="swatch" style="background:#f6f8fb;border:1px solid #5d5a82"></span>data &amp; external services</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="flow">
+  <div class="wrap reveal">
+    <p class="kicker"><span class="no">03</span> the request lifecycle</p>
+    <h2>A status the frontend watches.</h2>
+    <p class="section-lede">Each chat row carries a status. The UI polls <code>GET /api/chat/&lt;id&gt;</code> and shows a live bubble &mdash; including a 📚 &ldquo;learning&hellip;&rdquo; state while IRIS reads Wikipedia. Every hop is also a traceable interoperability message.</p>
+    <div class="flow">
+      <div class="phase"><span class="bar"></span><p class="ph">phase 00</p><h4>pending</h4><p>The WSGI app inserted the row; the polling <code>chatService</code> is about to claim it.</p></div>
+      <div class="phase"><span class="bar"></span><p class="ph">phase 01</p><h4>searching</h4><p>Resolves the question to entities, then scopes the chunk vector search to their documents.</p></div>
+      <div class="phase"><span class="bar"></span><p class="ph">phase 02</p><h4>learning</h4><p>Score below <code>0.55</code> &rarr; fetch the best page, chunk, embed, extract the entity graph.</p></div>
+      <div class="phase"><span class="bar"></span><p class="ph">phase 03</p><h4>answering</h4><p>The LLM writes a grounded reply from the retrieved chunks and triples.</p></div>
+      <div class="phase"><span class="bar"></span><p class="ph">phase 04</p><h4>done</h4><p>The answer lands; the topic is now remembered for next time.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="retrieval">
+  <div class="wrap reveal">
+    <p class="kicker"><span class="no">04</span> graph-first retrieval</p>
+    <h2>Let the graph pick the right sense.</h2>
+    <p class="section-lede">A plain vector search blurs namesakes together. <code>knowledgeOperation</code> matches the query against entity description vectors first &mdash; <b>and</b> by name, when an entity&rsquo;s full name appears in the question. Only entities within a cosine <b>margin</b> of the top match contribute their documents, and the chunk search is scoped to those documents, gathering chunks <i>per entity</i> through <code>EntityMention</code> so every named entity keeps its evidence. A weak scope widens to everything, then one hop over relationships joins related facts. Learning is disambiguated the same way.</p>
+    <div class="two">
+      <div class="panel win">
+        <span class="lbl">scoping · scopeMargin 0.12</span>
+        <h4>&ldquo;Tell me about Tesla, the car company&rdquo;</h4>
+        <p>The company entity outscores the inventor by more than the margin, so only its document is in scope &mdash; chunks about Nikola Tesla never enter the context. If the best scoped chunk is weak (&lt; <code>0.45</code>) the search widens to protect recall.</p>
+      </div>
+      <div class="panel lose">
+        <span class="lbl">disambiguation · candidate rerank</span>
+        <h4>&ldquo;Who was Neil Armstrong?&rdquo;</h4>
+        <p>When learning, the LLM distils a clean search title, several Wikipedia candidates are fetched, and the one whose intro best matches the question (by cosine) is ingested &mdash; the astronaut, not <i>RV Neil Armstrong</i> the research ship.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="graph">
+  <div class="wrap reveal">
+    <p class="kicker"><span class="no">05</span> the knowledge base</p>
+    <h2>A graph of meaning, stored entirely in IRIS.</h2>
+    <p class="section-lede">No external vector store, queue, or cache. Text becomes vectors via the IRIS <code>EMBEDDING</code> datatype; similarity is <code>VECTOR_COSINE</code> over HNSW indexes; entities and relationships form the graph traversed during retrieval.</p>
+    <div class="cards">
+      <div class="card"><div class="ct"><span class="dot" style="background:#5d5a82"></span>GraphKB.Document</div><p>One row per ingested page, unique by <span class="m">pageId</span> + language &mdash; an already-known topic skips learning and answers fast.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#00b2a9"></span>GraphKB.Chunk</div><p>Passages of an article. <span class="m">chunkVector</span> embeds <span class="m">embedText</span> &mdash; the chunk prefixed with its article title &mdash; over an HNSW index; <span class="m">chunkText</span> stays clean for display.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#2f2a95"></span>GraphKB.Entity</div><p>People, places and concepts the LLM pulls from each chunk, each with a description vector. Deduped on name + type + language so senses stay distinct.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#c8553d"></span>GraphKB.Relationship</div><p>Typed edges <span class="m">source → predicate → target</span>. After the entity match, the search expands one hop across these for richer context.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#00756e"></span>GraphKB.EntityMention</div><p>Links an entity to every chunk that mentions it &mdash; the bridge the per-entity search follows so a named entity contributes evidence from whatever document describes it, even across articles.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#9b98c2"></span>GraphKB.ChatRequest</div><p>The chat state machine itself &mdash; question, language, status, detail and answer &mdash; inserted by the web app and polled by the UI.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="stack">
+  <div class="wrap reveal">
+    <p class="kicker"><span class="no">08</span> the stack</p>
+    <div class="chips">
+      <span class="chip"><b>pyprod</b> interoperability · split modules, one loader</span>
+      <span class="chip"><b>Flask</b> over WSGI in IRIS</span>
+      <span class="chip"><b>EMBEDDING</b> datatype · VECTOR_COSINE · HNSW</span>
+      <span class="chip"><b>%Embedding.OpenAI</b> &rarr; Ollama</span>
+      <span class="chip"><b>gemma4:e2b</b> chat + <b>harrier-0.6b</b> embeddings</span>
+      <span class="chip"><b>Wikipedia</b> REST API</span>
+    </div>
+    <div class="run">
+      <span class="lbl">run it</span>
+      <pre>docker compose up -d --build      # builds IRIS (schema + EMBEDDING config + production), pulls models</pre>
+      <div class="url">→ http://localhost:52773/wikigraph/</div>
+    </div>
+  </div>
+</section>
+
+<section id="tuning">
+  <div class="wrap reveal">
+    <p class="kicker"><span class="no">09</span> tuning</p>
+    <h2>Every dial, and where to set it.</h2>
+    <p class="section-lede">Each parameter below is a <b>live setting</b> in the Management Portal (Interoperability &rarr; Productions &rarr; the item &rarr; Settings) &mdash; change it without recompiling. The cosine thresholds are calibrated for the current embedding model (<span class="m">harrier-0.6b</span> / <span class="m">bge-m3</span>, 1024-dim); <span class="m">ingestProcess</span> settings affect <em>future</em> ingestions only.</p>
+
+    <h3 class="tune-h">chatProcess <span class="g">· Search</span></h3>
+    <div class="tune"><table>
+      <thead><tr><th>property</th><th>what it does</th><th>default</th><th>ideal</th></tr></thead>
+      <tbody>
+        <tr><td class="prop">similarityThreshold</td><td class="what">Best chunk cosine <b>below which it learns from Wikipedia</b> instead of answering from the graph</td><td class="def">0.55</td><td class="ideal">0.50&ndash;0.60. Lower &rarr; answer from the graph more (less learning); higher &rarr; learn more aggressively (slower).</td></tr>
+        <tr><td class="prop">searchTopK</td><td class="what">Chunks the document-scoped vector search returns per query (before the per-entity gather &amp; maxChunks cap)</td><td class="def">5</td><td class="ideal">5&ndash;8. Keep lean for a small LLM; raise only with a bigger model and higher maxChunks.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3 class="tune-h">ingestProcess <span class="g">· Chunks</span></h3>
+    <div class="tune"><table>
+      <thead><tr><th>property</th><th>what it does</th><th>default</th><th>ideal</th></tr></thead>
+      <tbody>
+        <tr><td class="prop">chunkChars</td><td class="what">Target max characters per chunk (paragraph-aware split)</td><td class="def">1500</td><td class="ideal">1000&ndash;2000. Smaller &rarr; finer retrieval; larger &rarr; more context &amp; coverage, but coarser matching.</td></tr>
+        <tr><td class="prop">maxEmbedChunks</td><td class="what">How many chunks are stored &amp; embedded per article</td><td class="def">24</td><td class="ideal">24 for intro + key sections; 40&ndash;60 for full long articles. Higher = fuller but slower ingest. (chunkChars &times; maxEmbedChunks &asymp; chars stored.)</td></tr>
+        <tr><td class="prop">maxExtractChunks</td><td class="what">First N chunks the LLM mines for entities &amp; relationships</td><td class="def">3</td><td class="ideal">3&ndash;6. Higher &rarr; richer graph from deeper sections, but ingest cost scales per chunk (one LLM call each).</td></tr>
+        <tr><td class="prop">maxEntitiesPerChunk</td><td class="what">Cap on entities stored per extracted chunk</td><td class="def">8</td><td class="ideal">6&ndash;10. Higher = denser graph but more noise; lower = cleaner.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3 class="tune-h">knowledgeOperation <span class="g">· Retrieval</span></h3>
+    <div class="tune"><table>
+      <thead><tr><th>property</th><th>what it does</th><th>default</th><th>ideal</th></tr></thead>
+      <tbody>
+        <tr><td class="prop">entityFloor</td><td class="what">Min entity cosine to count as a <b>match</b> for the question</td><td class="def">0.30</td><td class="ideal">0.25&ndash;0.35. Lower &rarr; more recall &amp; noise; higher &rarr; stricter.</td></tr>
+        <tr><td class="prop">scopeMargin</td><td class="what">A rival entity must score within this of the top one to <b>share the document scope</b></td><td class="def">0.12</td><td class="ideal">0.08&ndash;0.15. Smaller &rarr; strict disambiguation (one sense wins, e.g. Tesla); larger &rarr; include co-relevant senses.</td></tr>
+        <tr><td class="prop">scopeFloor</td><td class="what">If the best <em>scoped</em> chunk is below this, <b>widen to all documents</b></td><td class="def">0.45</td><td class="ideal">0.40&ndash;0.50. Lower &rarr; trust the narrow scope; higher &rarr; widen more often (recall).</td></tr>
+        <tr><td class="prop">nameMatch</td><td class="what">Also match entities whose <b>full name literally appears</b> in the question</td><td class="def">1 (on)</td><td class="ideal">Keep 1 &mdash; essential for multi-entity questions. 0 = pure vector disambiguation.</td></tr>
+        <tr><td class="prop">perEntityChunks</td><td class="what">Chunks gathered <b>per matched/named entity</b> via EntityMention</td><td class="def">2</td><td class="ideal">1&ndash;3. Ensures each named entity contributes evidence; 0 disables the per-entity gather.</td></tr>
+        <tr><td class="prop">maxChunks</td><td class="what">Total chunk cap to the LLM after merging scoped + per-entity</td><td class="def">10</td><td class="ideal">8&ndash;12 for a small LLM (it degrades when flooded); go higher only with a larger chat model.</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3 class="tune-h">wikipediaOperation <span class="g">· Wikipedia</span></h3>
+    <div class="tune"><table>
+      <thead><tr><th>property</th><th>what it does</th><th>default</th><th>ideal</th></tr></thead>
+      <tbody>
+        <tr><td class="prop">userAgent</td><td class="what">User-Agent sent to the Wikipedia API</td><td class="def">WikiGraph</td><td class="ideal">Fine as-is; a descriptive UA with a contact is politer for heavy use.</td></tr>
+        <tr><td class="prop">maxExtractChars</td><td class="what">Max characters fetched from the chosen page</td><td class="def">120000</td><td class="ideal">Keep &ge; chunkChars &times; maxEmbedChunks so the fetch isn&rsquo;t the limiter; rarely needs changing.</td></tr>
+        <tr><td class="prop">searchCandidates</td><td class="what">Candidate pages fetched &amp; <b>reranked to pick the right one</b></td><td class="def">5</td><td class="ideal">3&ndash;6. More &rarr; better disambiguation (astronaut vs. &ldquo;RV Neil Armstrong&rdquo; ship), slightly slower.</td></tr>
+        <tr><td class="prop">extractTopic</td><td class="what">1 = LLM <b>distils the question into a clean search title</b> before searching</td><td class="def">1 (on)</td><td class="ideal">Keep 1 for better candidates; 0 = search the raw question (faster, worse titles).</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3 class="tune-h">llmOperation <span class="g">· Ollama Options</span></h3>
+    <div class="tune"><table>
+      <thead><tr><th>property</th><th>what it does <span style="text-transform:none;letter-spacing:0">(Ollama param)</span></th><th>default</th><th>ideal</th></tr></thead>
+      <tbody>
+        <tr><td class="prop">maxTokens</td><td class="what">Max tokens generated <b>per answer</b> (num_predict) &mdash; the main speed lever</td><td class="def">400</td><td class="ideal">300&ndash;600. Lower = faster but may truncate; higher = fuller, slower.</td></tr>
+        <tr><td class="prop">temperature</td><td class="what">Sampling randomness (temperature)</td><td class="def">0.3</td><td class="ideal">0.2&ndash;0.4 for factual RAG. Lower = more deterministic, cleaner JSON.</td></tr>
+        <tr><td class="prop">numCtx</td><td class="what">Context window in tokens (num_ctx)</td><td class="def">8192</td><td class="ideal">Keep &ge; prompt + context size. Raise to 16384 only with a much larger maxChunks; bigger costs time &amp; memory.</td></tr>
+        <tr><td class="prop">topP</td><td class="what">Nucleus sampling cutoff (top_p)</td><td class="def">0.9</td><td class="ideal">0.85&ndash;0.95. Lower = more focused/literal.</td></tr>
+        <tr><td class="prop">topK</td><td class="what">Consider only the top-K tokens (top_k)</td><td class="def">40</td><td class="ideal">20&ndash;40. Lower = tighter output.</td></tr>
+        <tr><td class="prop">keepAlive</td><td class="what">How long Ollama keeps the model <b>resident</b> between calls</td><td class="def">30m</td><td class="ideal">30&ndash;60m (or -1 = always) to avoid reload latency; shorten only on a shared GPU.</td></tr>
+        <tr><td class="prop">requestTimeout</td><td class="what">HTTP read timeout for the Ollama call (seconds)</td><td class="def">600</td><td class="ideal">300&ndash;600. Must exceed worst-case generation; keep high on CPU.</td></tr>
+        <tr><td class="prop">extractMaxTokens</td><td class="what">Token budget for <b>entity-extraction JSON</b></td><td class="def">1200</td><td class="ideal">1000&ndash;1500. Too low truncates the JSON and loses that chunk&rsquo;s entities.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="tune-note">Also on <span class="m">llmOperation</span> (group <b>Ollama</b>): <span class="m">ollamaUrl</span> and <span class="m">ollamaModel</span> &mdash; pointing <span class="m">ollamaModel</span> at a larger model (if pulled in the Ollama container) is the single biggest answer-quality lever, at the cost of speed and VRAM.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>WikiGraph — a self-growing GraphRAG chatbot on InterSystems IRIS</span>
+    ask · search · learn · answer
+  </div>
+</footer>
+
+<script>
+const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{threshold:.12});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>

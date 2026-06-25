@@ -1,0 +1,14 @@
+zn "%SYS"
+do ##class(Security.Users).UnExpireUserPasswords("*")
+do $SYSTEM.OBJ.Load("/opt/irisbuild/Installer.cls", "ck")
+set sc = ##class(App.Installer).setup()
+set sc = ##class(App.Installer).configure()
+// loadProduction.sh (next build step) compiles the pyprod modules through the embedded-iris
+// callin, which authenticates as IRISUSERNAME/IRISPASSWORD over %Service_CallIn. At runtime the
+// CPF merge enables that service and the password is known; during the image build neither is in
+// effect yet, so set them here or pyprod's `import iris` fails with IRIS_ACCESSDENIED.
+set props("Password") = "SYS"
+do ##class(Security.Users).Modify("_SYSTEM", .props)
+do ##class(Security.Services).Get("%Service_CallIn", .callin)
+set callin("Enabled") = 1, callin("AutheEnabled") = 48
+do ##class(Security.Services).Modify("%Service_CallIn", .callin)

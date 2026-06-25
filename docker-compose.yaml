@@ -1,0 +1,49 @@
+services:
+  iris:
+    hostname: iris-community
+    build:
+      args:
+        IRIS_IMAGE: ${IRIS_IMAGE}
+      context: .
+      dockerfile: ./src-iris/Dockerfile
+      secrets:
+        - iris_pw
+    stop_grace_period: 60s
+    environment:
+      - ISC_DATA_DIRECTORY=/opt/irisbuild/data
+      - ISC_CPF_MERGE_FILE=/opt/irisbuild/cpf/cpfmerge.cpf
+    volumes:
+      - ./src-iris:/opt/irisbuild
+    env_file: .env
+    ports:
+      - "${IRIS_SPORT}:1972"
+      - "${IRIS_PORT}:52773"
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    hostname: ollama
+    entrypoint: ["/bin/sh", "-c"]
+    # serve, then pull both the chat LLM and the embedding model
+    command:
+      - "ollama s erve & SERVE_PID=$$!; sleep 5; ollama pull ${OLLAMA_MODEL}; ollama pull ${EMBEDDING_MODEL}; wait $$SERVE_PID"
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT}:11434"
+    # remove the deploy section if you don't have a GPU or don't want to use it
+    deploy:
+       resources:
+         reservations:
+           devices:
+             - driver: nvidia
+               count: all
+               capabilities: [gpu]
+
+volumes:
+  ollama-models:
+
+secrets:
+  iris_pw:
+    file: "./src-iris/irispw.txt"

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WikiGraph — graph × vector flow (from the code &amp; message traces)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0b0a18;--bg-2:#100f1e;--panel:#16142d;--panel-2:#1c1a39;
+  --ink:#eceafe;--ink-soft:#a6a1d2;--ink-faint:#6d6896;
+  --graph:#f2a93b;--graph-deep:#b9791f;     /* GRAPH search */
+  --vector:#1bccbf;--vector-deep:#0c8079;   /* VECTOR search */
+  --indigo:#8d85ff;--coral:#ff6b6b;
+  --line:rgba(166,161,210,.16);--line-strong:rgba(166,161,210,.30);
+  --grid:rgba(141,133,255,.055);--mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:"Newsreader",Georgia,serif;background:var(--bg);color:var(--ink);font-size:18px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--vector);color:#04201e}
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:38px 38px}
+body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(900px 540px at 84% -8%,rgba(27,204,191,.10),transparent 60%),radial-gradient(820px 520px at -6% 6%,rgba(242,169,59,.09),transparent 58%),radial-gradient(1000px 700px at 50% 122%,rgba(141,133,255,.10),transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 2rem}
+
+.topbar{position:sticky;top:0;z-index:30;background:rgba(11,10,24,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:58px}
+.brand{display:flex;align-items:center;gap:.6rem;font-family:var(--mono);font-size:.74rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft)}
+.brand b{color:var(--ink);font-weight:500}.brand .g{width:18px;height:18px}
+.nav{display:flex;gap:1.3rem;font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase}
+.nav a{color:var(--ink-faint);text-decoration:none;transition:color .2s}.nav a:hover{color:var(--vector)}
+@media(max-width:780px){.nav{display:none}}
+
+.hero{padding:4.6rem 0 2.4rem}
+.eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.24em;text-transform:uppercase;color:var(--vector);display:flex;align-items:center;gap:.7rem}
+.eyebrow::before{content:"";width:34px;height:1px;background:var(--vector)}
+h1{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(2.6rem,7.5vw,5.2rem);line-height:1;margin:.55rem 0 .2rem;color:var(--ink)}
+h1 em{font-style:italic;color:var(--graph)}h1 .v{font-style:italic;color:var(--vector)}
+.lede{font-size:clamp(1.05rem,2vw,1.32rem);max-width:60ch;color:var(--ink-soft);margin-top:.9rem}
+.lede b{color:var(--ink);font-weight:500}
+.src{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);margin-top:1.1rem;letter-spacing:.03em}
+.src b{color:var(--vector);font-weight:500}
+
+section{padding:2.8rem 0;border-top:1px solid var(--line)}
+.kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-faint);display:flex;align-items:center;gap:.6rem;margin-bottom:.9rem}
+.kicker b{color:var(--vector);font-weight:500}
+h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(1.8rem,4.4vw,2.9rem);line-height:1.05;color:var(--ink);max-width:26ch}
+.section-lede{max-width:68ch;color:var(--ink-soft);margin-top:.7rem;font-size:1.04rem}
+code,.m{font-family:var(--mono);font-size:.82em;color:var(--vector);background:rgba(27,204,191,.10);padding:.06em .4em;border-radius:5px;border:1px solid rgba(27,204,191,.18);white-space:nowrap}
+.m.g{color:var(--graph);background:rgba(242,169,59,.10);border-color:rgba(242,169,59,.2)}
+
+.legend{display:flex;flex-wrap:wrap;gap:1.2rem 1.5rem;margin:1.4rem 0 .2rem;font-family:var(--mono);font-size:.7rem;letter-spacing:.03em;color:var(--ink-soft);text-transform:uppercase}
+.legend span{display:flex;align-items:center;gap:.5rem}
+.sw{width:24px;height:0;border-top-width:3px;border-top-style:solid}
+.sw.msg{border-style:solid}.sw.int{border-style:dashed}
+
+.chart{margin-top:1.4rem;background:linear-gradient(180deg,var(--bg-2),#0a0917);border:1px solid var(--line-strong);border-radius:18px;padding:1.3rem 1rem .8rem;box-shadow:0 40px 90px -50px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.03)}
+.chart svg{width:100%;height:auto;display:block}
+.flabel{font-family:var(--mono);font-size:12px}.fsub{font-family:var(--mono);font-size:10px}.fmsg{font-family:var(--mono);font-size:9.5px;letter-spacing:.02em}
+.dashflow{stroke-dasharray:7 6;animation:flow 1.1s linear infinite}@keyframes flow{to{stroke-dashoffset:-26}}
+
+/* trace evidence */
+.trace{margin-top:1.6rem;background:#0a0917;border:1px solid var(--line);border-radius:14px;padding:1.3rem 1.4rem;font-family:var(--mono);font-size:.8rem;line-height:1.85;overflow-x:auto}
+.trace .ln{white-space:nowrap}
+.trace .src2{color:var(--ink-soft)}.trace .ar{color:var(--ink-faint)}
+.trace .tgt{color:var(--ink)}.trace .msg{color:var(--vector);float:right;padding-left:2rem}
+.trace .g{color:var(--graph)}.trace .c{color:var(--coral)}
+.trace .sess{color:var(--ink-faint);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:.7rem}
+.trace .x2{color:var(--graph);font-size:.7rem}
+
+footer{border-top:1px solid var(--line-strong);padding:2.4rem 0 3.4rem;margin-top:.6rem}
+footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:1rem;font-family:var(--mono);font-size:.72rem;color:var(--ink-faint)}
+footer b{font-family:"Instrument Serif",serif;font-style:italic;font-size:1.4rem;color:var(--ink)}
+
+.reveal{opacity:0;transform:translateY(22px);transition:opacity .8s cubic-bezier(.2,.7,.2,1),transform .8s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+.hero .eyebrow,.hero h1,.hero .lede,.hero .src{opacity:0;animation:rise .85s cubic-bezier(.2,.7,.2,1) forwards}
+.hero h1{animation-delay:.07s}.hero .lede{animation-delay:.16s}.hero .src{animation-delay:.24s}
+@keyframes rise{to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+
+<div class="topbar"><div class="wrap">
+  <div class="brand">
+    <svg class="g" viewBox="0 0 24 24"><g fill="none" stroke-width="1.5"><path d="M5 6 L18 4 M5 6 L9 17 M18 4 L9 17 M18 4 L20 14 M9 17 L20 14" stroke="#8d85ff"/></g><g><circle cx="5" cy="6" r="2.1" fill="#f2a93b"/><circle cx="18" cy="4" r="2.1" fill="#1bccbf"/><circle cx="9" cy="17" r="2.1" fill="#1bccbf"/><circle cx="20" cy="14" r="2.1" fill="#f2a93b"/></g></svg>
+    <span><b>WikiGraph</b> · graph × vector flow</span>
+  </div>
+  <nav class="nav"><a href="#orchestration">orchestration</a><a href="#core">graph × vector</a><a href="#trace">the trace</a></nav>
+</div></div>
+
+<header class="hero"><div class="wrap">
+  <p class="eyebrow">reconstructed from the source &amp; the interoperability trace</p>
+  <h1>How <em>graph</em> and <span class="v">vector</span> search work together.</h1>
+  <p class="lede">Every question runs one embedding through two searches. The <b>graph</b> decides <em>which</em> entity you mean; that decision <b>scopes</b> the <span style="color:var(--vector)">vector</span> search over the text. Below: the real message flow, then the logic inside the one hop where the two searches meet.</p>
+  <p class="src">faithful to · <b>operations.py</b> knowledgeOperation · <b>processes.py</b> chatProcess / ingestProcess · <b>services.py</b> · Ens.MessageHeader trace</p>
+</div></header>
+
+<!-- ============ PART A : ORCHESTRATION ============ -->
+<section id="orchestration"><div class="wrap reveal">
+  <p class="kicker"><b>part 1</b> &nbsp;the orchestration</p>
+  <h2>Where the two searches sit in the pipeline.</h2>
+  <p class="section-lede">Solid arrows are real <b style="color:var(--ink)">messages between hosts</b> — each is a row in the message trace. Dashed arrows are <b style="color:var(--ink)">internal calls</b> inside one host (SQL or sub-requests). <span class="m">knowledgeOperation</span> runs <b>once</b> for a known topic and <b>twice</b> when it must learn first.</p>
+  <div class="legend">
+    <span><span class="sw msg" style="border-color:#a6a1d2"></span>message hop (visible in trace)</span>
+    <span><span class="sw" style="border-color:#f2a93b"></span>graph search</span>
+    <span><span class="sw" style="border-color:#1bccbf"></span>vector search</span>
+    <span><span class="sw" style="border-color:#ff6b6b"></span>learning branch</span>
+  </div>
+
+  <div class="chart">
+    <svg viewBox="0 0 960 900" role="img" aria-labelledby="aT aD">
+      <title id="aT">WikiGraph orchestration flow</title>
+      <desc id="aD">The WSGI app inserts a pending ChatRequest. chatService claims it and sends chatRequestMsg to chatProcess. chatProcess calls knowledgeOperation (search 1). If the best score is below the similarity threshold it learns: wikipediaOperation fetches one page (after an LLM topic distillation and candidate rerank), ingestProcess chunks, embeds and extracts entities via three LLM calls, then knowledgeOperation runs again (search 2). Finally llmOperation writes the answer and the ChatRequest is marked done.</desc>
+      <defs>
+        <marker id="mg" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#a6a1d2" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+        <marker id="mc" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#ff6b6b" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+        <marker id="mt" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#1bccbf" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+      </defs>
+
+      <!-- main spine -->
+      <rect x="55" y="18" width="380" height="54" rx="11" fill="#16142d" stroke="#8d85ff" stroke-width="1.2"/>
+      <text class="flabel" x="75" y="42" fill="#eceafe" font-weight="600">GraphKB.ChatRequest · status = pending</text>
+      <text class="fsub" x="75" y="60" fill="#a6a1d2">WSGI app inserts the row (POST /api/chat)</text>
+
+      <path d="M245 72 L245 100" stroke="#a6a1d2" stroke-width="1.4" marker-end="url(#mg)"/>
+      <text class="fmsg" x="255" y="90" fill="#6d6896">polled every 1s · UPDATE status='searching'</text>
+
+      <rect x="55" y="102" width="380" height="52" rx="11" fill="#16142d" stroke="#8d85ff" stroke-width="1.2"/>
+      <text class="flabel" x="75" y="125" fill="#eceafe" font-weight="600">chatService  (Business Service)</text>
+      <text class="fsub" x="75" y="143" fill="#a6a1d2">chatPollAdapter claims the row</text>
+
+      <path d="M245 154 L245 182" stroke="#a6a1d2" stroke-width="1.6" marker-end="url(#mg)"/>
+      <text class="fmsg" x="255" y="172" fill="#1bccbf">chatRequestMsg</text>
+
+      <rect x="55" y="184" width="380" height="58" rx="11" fill="#1c1a39" stroke="#8d85ff" stroke-width="1.5"/>
+      <text class="flabel" x="75" y="208" fill="#eceafe" font-weight="700">chatProcess  (orchestrator)</text>
+      <text class="fsub" x="75" y="227" fill="#cfc9f1">status: searching → learning → answering → done</text>
+
+      <path d="M245 242 L245 274" stroke="#a6a1d2" stroke-width="1.6" marker-end="url(#mg)"/>
+      <text class="fmsg" x="255" y="262" fill="#1bccbf">knowledgeSearchRequest</text>
+
+      <!-- search 1 -->
+      <rect x="55" y="276" width="380" height="66" rx="11" fill="#16142d" stroke="#f2a93b" stroke-width="1.4"/>
+      <rect x="55" y="276" width="9" height="66" rx="4" fill="#1bccbf"/>
+      <text class="flabel" x="80" y="300" fill="#eceafe" font-weight="700">knowledgeOperation · SEARCH ①</text>
+      <text class="fsub" x="80" y="318" fill="#cfc9f1">graph-first + entity-scoped vector search</text>
+      <text class="fsub" x="80" y="334" fill="#8d85ff">▼ expanded in Part 2 · returns { bestScore, context }</text>
+
+      <path d="M245 342 L245 372" stroke="#a6a1d2" stroke-width="1.6" marker-end="url(#mg)"/>
+      <text class="fmsg" x="255" y="362" fill="#1bccbf">knowledgeSearchResponse</text>
+
+      <!-- decision -->
+      <rect x="55" y="374" width="380" height="60" rx="11" fill="#16142d" stroke="#ff6b6b" stroke-width="1.4"/>
+      <text class="flabel" x="75" y="398" fill="#ff6b6b" font-weight="700">bestScore &lt; similarityThreshold (0.55) ?</text>
+      <text class="fsub" x="75" y="417" fill="#a6a1d2">decided in chatProcess.OnRequest</text>
+      <text class="fmsg" x="360" y="398" fill="#1bccbf">no ↓</text>
+      <text class="fmsg" x="360" y="417" fill="#ff6b6b">yes →</text>
+
+      <!-- learning branch (right) -->
+      <path d="M435 404 L505 404" stroke="#ff6b6b" stroke-width="1.6" marker-end="url(#mc)"/>
+      <text class="fmsg" x="500" y="500" fill="#ff6b6b" text-anchor="middle" transform="rotate(0)"></text>
+
+      <rect x="505" y="300" width="420" height="104" rx="11" fill="#1c1a39" stroke="#ff6b6b" stroke-width="1.2"/>
+      <text class="flabel" x="525" y="324" fill="#ff8d8d" font-weight="700">wikipediaOperation</text>
+      <text class="fmsg" x="525" y="343" fill="#1bccbf">← chatProcess : wikiFetchRequest</text>
+      <text class="fsub" x="525" y="362" fill="#cfc9f1">• extractTopicMsg → llmOperation  (distil a clean title)</text>
+      <text class="fsub" x="525" y="378" fill="#cfc9f1">• fetch N candidates · cosine-rerank intro vs question</text>
+      <text class="fsub" x="525" y="394" fill="#cfc9f1">• fetch 1 page, no links → wikiFetchResponse</text>
+
+      <path d="M715 404 L715 432" stroke="#ff6b6b" stroke-width="1.4" marker-end="url(#mc)"/>
+
+      <rect x="505" y="434" width="420" height="120" rx="11" fill="#1c1a39" stroke="#ff6b6b" stroke-width="1.2"/>
+      <text class="flabel" x="525" y="458" fill="#ff8d8d" font-weight="700">ingestProcess</text>
+      <text class="fmsg" x="525" y="477" fill="#1bccbf">← chatProcess : ingestRequest</text>
+      <text class="fsub" x="525" y="496" fill="#cfc9f1">• chunk → embedText (title + chunk) → Chunk.chunkVector</text>
+      <text class="fsub" x="525" y="512" fill="#cfc9f1">• first 3 chunks: extractEntitiesMsg → llmOperation</text>
+      <text class="fsub" x="525" y="528" fill="#cfc9f1">• storeGraph: Entity · EntityMention · Relationship</text>
+      <text class="fsub" x="525" y="544" fill="#a6a1d2">→ ingestResponse</text>
+
+      <!-- learn loops back to search 2 -->
+      <path d="M505 540 C 250 600, 470 600, 245 620" fill="none" stroke="#ff6b6b" stroke-width="1.5" stroke-dasharray="2 0" marker-end="url(#mg)"/>
+      <text class="fmsg" x="300" y="588" fill="#a6a1d2">knowledgeSearchRequest  (re-query)</text>
+
+      <!-- search 2 -->
+      <rect x="55" y="622" width="380" height="62" rx="11" fill="#16142d" stroke="#f2a93b" stroke-width="1.4"/>
+      <rect x="55" y="622" width="9" height="62" rx="4" fill="#1bccbf"/>
+      <text class="flabel" x="80" y="646" fill="#eceafe" font-weight="700">knowledgeOperation · SEARCH ② (enriched)</text>
+      <text class="fsub" x="80" y="664" fill="#cfc9f1">same logic, now over the freshly-grown graph</text>
+      <text class="fsub" x="80" y="679" fill="#8d85ff">only happens on the learning path</text>
+
+      <!-- no-branch bypass: decision -> answer directly -->
+      <path d="M75 434 C 20 470, 20 690, 50 712" fill="none" stroke="#1bccbf" stroke-width="1.5" marker-end="url(#mt)"/>
+      <text class="fmsg" x="14" y="560" fill="#1bccbf" transform="rotate(-90 14 560)">known topic · answer directly</text>
+
+      <path d="M245 684 L245 712" stroke="#a6a1d2" stroke-width="1.6" marker-end="url(#mg)"/>
+      <text class="fmsg" x="255" y="702" fill="#1bccbf">generateAnswerMsg</text>
+
+      <rect x="55" y="714" width="380" height="62" rx="11" fill="#16142d" stroke="#1bccbf" stroke-width="1.4"/>
+      <text class="flabel" x="75" y="738" fill="#eceafe" font-weight="700">llmOperation → grounded answer</text>
+      <text class="fsub" x="75" y="756" fill="#cfc9f1">context JSON in · gemma4:e2b · think:false</text>
+      <text class="fmsg" x="75" y="771" fill="#1bccbf">→ chatProcess : llmResponseMsg</text>
+
+      <path d="M245 776 L245 804" stroke="#a6a1d2" stroke-width="1.4" marker-end="url(#mg)"/>
+      <rect x="55" y="806" width="380" height="52" rx="11" fill="#16142d" stroke="#8d85ff" stroke-width="1.2"/>
+      <text class="flabel" x="75" y="830" fill="#eceafe" font-weight="600">GraphKB.ChatRequest · status = done</text>
+      <text class="fsub" x="75" y="848" fill="#a6a1d2">UI polls GET /api/chat/&lt;id&gt; and renders the answer</text>
+    </svg>
+  </div>
+</div></section>
+
+<!-- ============ PART B : THE GRAPH × VECTOR CORE ============ -->
+<section id="core"><div class="wrap reveal">
+  <p class="kicker"><b>part 2</b> &nbsp;inside one hop</p>
+  <h2>knowledgeOperation.onSearch — where the searches meet.</h2>
+  <p class="section-lede">This all happens inside the single <span class="m">knowledgeSearchRequest</span> hop above. One query embedding feeds both lanes; the <span style="color:var(--graph)">amber</span> graph lane (vector match <b>plus</b> lexical name match) yields documents that <b>filter</b> the <span style="color:var(--vector)">teal</span> vector lane. The chunk search runs two ways — document-scoped <b>and</b> per-entity via <span class="m g">EntityMention</span> — then merges, so a multi-entity question keeps evidence for <em>every</em> named entity, not just the dominant sense.</p>
+  <div class="legend">
+    <span><span class="sw" style="border-color:#f2a93b"></span>graph · GraphKB.Entity · descVector</span>
+    <span><span class="sw" style="border-color:#1bccbf"></span>vector · GraphKB.Chunk · chunkVector</span>
+    <span><span class="sw dashflow" style="border-image:linear-gradient(90deg,#f2a93b,#1bccbf) 1;border-color:#1bccbf"></span>the graph filter (scope)</span>
+  </div>
+
+  <div class="chart">
+    <svg viewBox="0 0 960 760" role="img" aria-labelledby="bT bD">
+      <title id="bT">Graph-first entity-scoped retrieval inside knowledgeOperation</title>
+      <desc id="bD">The query is embedded once. Entities are matched two ways: by description-vector cosine above entityFloor 0.3, and by lexical name match when an entity's full name appears in the question. A margin cutoff of topScore minus scopeMargin 0.12 picks the winning sense and collects its documents as scopeDocs. Chunks are then searched two ways and merged: a document-scoped vector search restricted to scopeDocs, and a per-entity search that, for each matched or named entity, takes its top chunks among those that mention it via EntityMention. The merged set is deduplicated and capped at maxChunks. If the best score is below scopeFloor 0.45 it widens to all documents. expandRelationships adds a one-hop walk over relationships among the matched entities. Everything is assembled into a JSON context with the best score.</desc>
+      <defs>
+        <marker id="aA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#f2a93b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+        <marker id="aT2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#1bccbf" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+        <marker id="aG2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#6d6896" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+        <linearGradient id="br" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#f2a93b"/><stop offset="1" stop-color="#1bccbf"/></linearGradient>
+      </defs>
+
+      <text class="fsub" x="225" y="206" text-anchor="middle" fill="#f2a93b" letter-spacing="2">▲ GRAPH LANE</text>
+      <text class="fsub" x="735" y="206" text-anchor="middle" fill="#1bccbf" letter-spacing="2">● VECTOR LANE</text>
+
+      <!-- request + embed -->
+      <rect x="330" y="16" width="300" height="56" rx="11" fill="#1c1a39" stroke="#8d85ff" stroke-width="1.3"/>
+      <text class="flabel" x="480" y="40" text-anchor="middle" fill="#eceafe" font-weight="600">knowledgeSearchRequest</text>
+      <text class="fsub" x="480" y="58" text-anchor="middle" fill="#a6a1d2">{ query, lang, topK = searchTopK (5) }</text>
+
+      <path d="M480 72 L480 104" stroke="#6d6896" stroke-width="1.4" marker-end="url(#aG2)"/>
+      <text class="fsub" x="496" y="92" fill="#8d85ff">EMBEDDING(query,'wikiembed') → Ollama · 1024-d</text>
+
+      <rect x="360" y="106" width="240" height="48" rx="11" fill="#16142d" stroke="#8d85ff" stroke-width="1.2"/>
+      <text class="flabel" x="480" y="135" text-anchor="middle" fill="#eceafe" font-weight="600">query vector  q&#8407;</text>
+
+      <!-- split -->
+      <path d="M430 154 C 360 178, 250 180, 225 222" fill="none" stroke="#f2a93b" stroke-width="1.5" marker-end="url(#aA)"/>
+      <path d="M530 154 C 620 180, 740 184, 745 384" fill="none" stroke="#1bccbf" stroke-width="1.5" marker-end="url(#aT2)"/>
+
+      <!-- GRAPH lane -->
+      <rect x="40" y="224" width="370" height="92" rx="12" fill="#16142d" stroke="#f2a93b" stroke-width="1.3"/>
+      <text class="flabel" x="60" y="250" fill="#f2a93b" font-weight="700">①  match entities — vector + name</text>
+      <text class="fsub" x="60" y="271" fill="#cfc9f1">VECTOR_COSINE( Entity.descVector , q&#8407; ) &#8805; entityFloor</text>
+      <text class="fsub" x="60" y="288" fill="#a6a1d2">TOP 8 DESC, keep score &#8805; 0.30</text>
+      <text class="fsub" x="60" y="305" fill="#f2a93b" font-weight="600">&#8853; nameMatch: full entity name appears in question</text>
+
+      <path d="M225 316 L225 350" stroke="#f2a93b" stroke-width="1.5" marker-end="url(#aA)"/>
+
+      <rect x="40" y="352" width="370" height="84" rx="12" fill="#16142d" stroke="#f2a93b" stroke-width="1.3"/>
+      <text class="flabel" x="60" y="378" fill="#f2a93b" font-weight="700">②  margin cutoff → winning sense</text>
+      <text class="fsub" x="60" y="399" fill="#cfc9f1">keep score &#8805; topScore &#8722; scopeMargin (0.12)</text>
+      <text class="fsub" x="60" y="416" fill="#a6a1d2">dominant sense survives · rivals dropped</text>
+
+      <path d="M225 436 L225 470" stroke="#f2a93b" stroke-width="1.5" marker-end="url(#aA)"/>
+
+      <rect x="40" y="472" width="370" height="76" rx="12" fill="#1c1a39" stroke="#f2a93b" stroke-width="1.6"/>
+      <text class="flabel" x="60" y="498" fill="#f2a93b" font-weight="700">③  scopeDocs = their documentRef</text>
+      <text class="fsub" x="60" y="519" fill="#cfc9f1">distinct article ids of in-scope entities</text>
+      <text class="fsub" x="60" y="536" fill="#a6a1d2">also keeps entityIds for step ⑤</text>
+
+      <!-- the bridge -->
+      <path class="dashflow" d="M410 510 L590 510" fill="none" stroke="url(#br)" stroke-width="3.4" marker-end="url(#aT2)"/>
+      <text class="fsub" x="500" y="500" text-anchor="middle" fill="#1bccbf" font-weight="700">scopeDocs ⟶ graph filter</text>
+
+      <!-- VECTOR lane -->
+      <rect x="590" y="386" width="370" height="114" rx="12" fill="#16142d" stroke="#1bccbf" stroke-width="1.3"/>
+      <text class="flabel" x="610" y="412" fill="#1bccbf" font-weight="700">④  searchChunks — scoped &#8853; per-entity</text>
+      <text class="fsub" x="610" y="433" fill="#bdeee9">(a) VECTOR_COSINE( Chunk.chunkVector , q&#8407; )</text>
+      <text class="fsub" x="610" y="450" fill="#f2a93b" font-weight="600">&nbsp;&nbsp;&nbsp;&nbsp;WHERE documentRef IN (scopeDocs) · TOP K</text>
+      <text class="fsub" x="610" y="467" fill="#bdeee9">(b) per matched/named entity, top chunks</text>
+      <text class="fsub" x="610" y="484" fill="#f2a93b" font-weight="600">&nbsp;&nbsp;&nbsp;&nbsp;JOIN EntityMention → merge, dedup, cap maxChunks</text>
+
+      <path d="M775 500 L775 540" stroke="#1bccbf" stroke-width="1.5" marker-end="url(#aT2)"/>
+
+      <rect x="600" y="542" width="350" height="70" rx="12" fill="#16142d" stroke="#1bccbf" stroke-width="1.2" stroke-dasharray="5 4"/>
+      <text class="flabel" x="775" y="568" text-anchor="middle" fill="#1bccbf" font-weight="700">bestScore &lt; scopeFloor (0.45) ?</text>
+      <text class="fsub" x="775" y="588" text-anchor="middle" fill="#a6a1d2">yes → re-run searchChunks over ALL docs,</text>
+      <text class="fsub" x="775" y="604" text-anchor="middle" fill="#a6a1d2">keep whichever scores higher (protect recall)</text>
+
+      <!-- entityIds → relationships -->
+      <path d="M95 548 C 95 636, 150 648, 205 666" fill="none" stroke="#f2a93b" stroke-width="1.4" marker-end="url(#aA)"/>
+      <text class="fsub" x="70" y="600" fill="#f2a93b">entityIds</text>
+
+      <rect x="210" y="620" width="360" height="92" rx="12" fill="#16142d" stroke="#f2a93b" stroke-width="1.3"/>
+      <text class="flabel" x="230" y="646" fill="#f2a93b" font-weight="700">⑤  expandRelationships  (1-hop)</text>
+      <text class="fsub" x="230" y="667" fill="#cfc9f1">GraphKB.Relationship among matched entities</text>
+      <text class="fsub" x="230" y="684" fill="#a6a1d2">source → predicate → target (dedup, cap 30)</text>
+      <text class="fsub" x="230" y="701" fill="#a6a1d2">WHERE sourceEntityRef IN ids OR targetEntityRef IN ids</text>
+
+      <!-- chunks → merge ; relationships → merge -->
+      <path d="M775 612 C 775 660, 720 672, 575 690" fill="none" stroke="#1bccbf" stroke-width="1.5" marker-end="url(#aT2)"/>
+      <text class="fsub" x="700" y="648" fill="#1bccbf">chunks</text>
+
+      <!-- merge node -->
+      <rect x="600" y="636" width="360" height="92" rx="12" fill="#1c1a39" stroke="#8d85ff" stroke-width="1.5"/>
+      <text class="flabel" x="780" y="662" text-anchor="middle" fill="#eceafe" font-weight="700">⑥  knowledgeSearchResponse</text>
+      <text class="fsub" x="780" y="683" text-anchor="middle" fill="#cfc9f1">context = { chunks · entities · relationships }</text>
+      <text class="fsub" x="780" y="700" text-anchor="middle" fill="#a6a1d2">json.dumps(…, ensure_ascii=False)</text>
+      <text class="fsub" x="780" y="717" text-anchor="middle" fill="#a6a1d2">+ bestScore → back to chatProcess</text>
+
+      <path d="M570 672 C 585 676, 590 678, 598 680" fill="none" stroke="#f2a93b" stroke-width="1.5" marker-end="url(#aA)"/>
+    </svg>
+  </div>
+</div></section>
+
+<!-- ============ THE TRACE ============ -->
+<section id="trace"><div class="wrap reveal">
+  <p class="kicker"><b>evidence</b> &nbsp;the message trace</p>
+  <h2>One learning session, exactly as recorded.</h2>
+  <p class="section-lede">Captured from <code>Ens.MessageHeader</code> (one session id), in order. A known-topic question is just the first three lines plus the answer pair — no learning detour, one <span class="m">knowledgeOperation</span> call.</p>
+  <div class="trace">
+    <span class="sess">session · learning path · 15 messages</span>
+    <div class="ln"><span class="src2">chatService</span> <span class="ar">→</span> <span class="tgt">chatProcess</span><span class="msg">chatRequestMsg</span></div>
+    <div class="ln"><span class="src2">chatProcess</span> <span class="ar">→</span> <span class="tgt">knowledgeOperation</span><span class="msg">knowledgeSearchRequest&nbsp; ①</span></div>
+    <div class="ln"><span class="src2">knowledgeOperation</span> <span class="ar">→</span> <span class="tgt">chatProcess</span><span class="msg">knowledgeSearchResponse</span></div>
+    <div class="ln"><span class="c">▸ bestScore &lt; 0.55 → learn</span></div>
+    <div class="ln"><span class="src2">chatProcess</span> <span class="ar">→</span> <span class="tgt">wikipediaOperation</span><span class="msg">wikiFetchRequest</span></div>
+    <div class="ln"><span class="src2">wikipediaOperation</span> <span class="ar">→</span> <span class="tgt">llmOperation</span><span class="msg g">extractTopicMsg</span></div>
+    <div class="ln"><span class="src2">llmOperation</span> <span class="ar">→</span> <span class="tgt">wikipediaOperation</span><span class="msg">llmResponseMsg</span></div>
+    <div class="ln"><span class="src2">wikipediaOperation</span> <span class="ar">→</span> <span class="tgt">chatProcess</span><span class="msg">wikiFetchResponse</span></div>
+    <div class="ln"><span class="src2">chatProcess</span> <span class="ar">→</span> <span class="tgt">ingestProcess</span><span class="msg">ingestRequest</span></div>
+    <div class="ln"><span class="src2">ingestProcess</span> <span class="ar">→</span> <span class="tgt">llmOperation</span><span class="msg g">extractEntitiesMsg&nbsp; <span class="x2">×3</span></span></div>
+    <div class="ln"><span class="src2">llmOperation</span> <span class="ar">→</span> <span class="tgt">ingestProcess</span><span class="msg">llmResponseMsg&nbsp; <span class="x2">×3</span></span></div>
+    <div class="ln"><span class="src2">ingestProcess</span> <span class="ar">→</span> <span class="tgt">chatProcess</span><span class="msg">ingestResponse</span></div>
+    <div class="ln"><span class="src2">chatProcess</span> <span class="ar">→</span> <span class="tgt">knowledgeOperation</span><span class="msg">knowledgeSearchRequest&nbsp; ②</span></div>
+    <div class="ln"><span class="src2">knowledgeOperation</span> <span class="ar">→</span> <span class="tgt">chatProcess</span><span class="msg">knowledgeSearchResponse</span></div>
+    <div class="ln"><span class="src2">chatProcess</span> <span class="ar">→</span> <span class="tgt">llmOperation</span><span class="msg">generateAnswerMsg</span></div>
+    <div class="ln"><span class="src2">llmOperation</span> <span class="ar">→</span> <span class="tgt">chatProcess</span><span class="msg">llmResponseMsg</span></div>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <span>WikiGraph — graph-first, entity-scoped GraphRAG on InterSystems IRIS</span>
+  <b>graph &times; vector</b>
+</div></footer>
+
+<script>
+const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{threshold:.08});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>

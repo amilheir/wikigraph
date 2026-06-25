@@ -1,0 +1,6 @@
+[Actions]
+ModifyService:Name=%Service_CallIn,Enabled=1,AutheEnabled=48
+[Startup]
+SystemMode=IRIS Dev Community
+[config]
+PythonPath=/opt/.venv/lib/python3.12/site-packages

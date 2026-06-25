@@ -1,0 +1,6 @@
+.vscode/
+src-iris/data
+src-iris/production/__pycache__
+src-iris/wsgi/__pycache__
+src-iris/iris-main.log
+.claude

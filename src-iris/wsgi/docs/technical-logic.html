@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WikiGraph — Technical Logic · how graph and vector search work together</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0b0a18;
+  --bg-2:#100f1e;
+  --panel:#16142d;
+  --panel-2:#1c1a39;
+  --ink:#eceafe;
+  --ink-soft:#a6a1d2;
+  --ink-faint:#6d6896;
+  --graph:#f2a93b;        /* GRAPH lane — entities & relationships */
+  --graph-deep:#b9791f;
+  --vector:#1bccbf;       /* VECTOR lane — chunk similarity */
+  --vector-deep:#0c8079;
+  --indigo:#8d85ff;
+  --coral:#ff6b6b;
+  --line:rgba(166,161,210,.16);
+  --line-strong:rgba(166,161,210,.30);
+  --grid:rgba(141,133,255,.055);
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:"Newsreader",Georgia,serif;
+  background:var(--bg);
+  color:var(--ink);
+  font-size:18px;line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+::selection{background:var(--vector);color:#04201e}
+
+/* engineering grid + glow atmosphere */
+body::before{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:
+    linear-gradient(var(--grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:38px 38px;
+}
+body::after{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(900px 540px at 82% -8%, rgba(27,204,191,.10), transparent 60%),
+    radial-gradient(820px 520px at -6% 8%, rgba(242,169,59,.09), transparent 58%),
+    radial-gradient(1000px 700px at 50% 120%, rgba(141,133,255,.10), transparent 60%);
+}
+.wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 2rem}
+
+/* top bar */
+.topbar{position:sticky;top:0;z-index:30;background:rgba(11,10,24,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.topbar .wrap{display:flex;align-items:center;justify-content:space-between;height:58px}
+.brand{display:flex;align-items:center;gap:.6rem;font-family:var(--mono);font-size:.74rem;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-soft)}
+.brand b{color:var(--ink);font-weight:500}
+.brand .g{width:18px;height:18px}
+.nav{display:flex;gap:1.3rem;font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase}
+.nav a{color:var(--ink-faint);text-decoration:none;transition:color .2s}
+.nav a:hover{color:var(--vector)}
+@media(max-width:860px){.nav{display:none}}
+
+/* hero */
+.hero{padding:5.5rem 0 3rem;position:relative}
+.eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.26em;text-transform:uppercase;color:var(--vector);display:flex;align-items:center;gap:.7rem}
+.eyebrow::before{content:"";width:36px;height:1px;background:var(--vector)}
+h1{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(3rem,9vw,6.6rem);line-height:.98;letter-spacing:-.01em;margin:.6rem 0 .2rem;color:var(--ink)}
+h1 em{font-style:italic;color:var(--graph)}
+h1 .v{font-style:italic;color:var(--vector)}
+.lede{font-size:clamp(1.12rem,2.2vw,1.5rem);line-height:1.5;max-width:46ch;color:var(--ink-soft);margin-top:1.1rem}
+.lede b{color:var(--ink);font-weight:500}
+.keyline{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.9rem;font-family:var(--mono);font-size:.72rem}
+.keyline span{border:1px solid var(--line-strong);border-radius:999px;padding:.34rem .85rem;color:var(--ink-soft);letter-spacing:.04em}
+.keyline .a{border-color:rgba(242,169,59,.5);color:var(--graph)}
+.keyline .t{border-color:rgba(27,204,191,.5);color:var(--vector)}
+
+/* sections */
+section{padding:3.4rem 0;border-top:1px solid var(--line)}
+.kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-faint);display:flex;align-items:center;gap:.6rem;margin-bottom:1rem}
+.kicker b{color:var(--vector);font-weight:500}
+h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(2rem,5vw,3.3rem);line-height:1.05;letter-spacing:0;color:var(--ink);max-width:24ch}
+.section-lede{max-width:66ch;color:var(--ink-soft);margin-top:.9rem;font-size:1.07rem}
+code,.m{font-family:var(--mono);font-size:.82em;color:var(--vector);background:rgba(27,204,191,.10);padding:.08em .42em;border-radius:5px;border:1px solid rgba(27,204,191,.18);white-space:nowrap}
+.m.g{color:var(--graph);background:rgba(242,169,59,.10);border-color:rgba(242,169,59,.2)}
+
+/* two-search intro */
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem;margin-top:2rem}
+@media(max-width:760px){.duo{grid-template-columns:1fr}}
+.lane{border-radius:16px;padding:1.5rem 1.6rem;background:var(--panel);border:1px solid var(--line)}
+.lane.graph{border-top:3px solid var(--graph)}
+.lane.vector{border-top:3px solid var(--vector)}
+.lane .tg{font-family:var(--mono);font-size:.7rem;letter-spacing:.16em;text-transform:uppercase}
+.lane.graph .tg{color:var(--graph)}
+.lane.vector .tg{color:var(--vector)}
+.lane h3{font-family:"Instrument Serif",serif;font-weight:400;font-size:1.7rem;margin:.4rem 0 .5rem;color:var(--ink)}
+.lane p{font-size:.98rem;color:var(--ink-soft);line-height:1.5}
+.lane .fn{font-family:var(--mono);font-size:.78rem;color:var(--ink-faint);margin-top:.9rem}
+
+/* flowchart frame */
+.chart{margin-top:2rem;background:linear-gradient(180deg,var(--bg-2),#0a0917);border:1px solid var(--line-strong);border-radius:18px;padding:1.4rem 1rem .6rem;box-shadow:0 40px 90px -50px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.03)}
+.chart svg{width:100%;height:auto;display:block}
+.flabel{font-family:var(--mono);font-size:12px;letter-spacing:.01em}
+.fsub{font-family:var(--mono);font-size:10px;letter-spacing:.01em}
+.dashflow{stroke-dasharray:7 6;animation:flow 1.1s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-26}}
+.pulse{animation:pulse 3s ease-in-out infinite;transform-origin:center}
+@keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+.legend{display:flex;flex-wrap:wrap;gap:1.3rem;margin:1rem .4rem .3rem;font-family:var(--mono);font-size:.7rem;letter-spacing:.04em;color:var(--ink-soft);text-transform:uppercase}
+.legend span{display:flex;align-items:center;gap:.5rem}
+.sw{width:22px;height:0;border-top-width:3px;border-top-style:solid}
+
+/* numbered stages */
+.stages{margin-top:2rem;display:flex;flex-direction:column;gap:0}
+.stage{display:grid;grid-template-columns:54px 1fr;gap:1.3rem;padding:1.5rem 0;border-top:1px solid var(--line)}
+.stage:first-child{border-top:0}
+.stage .num{font-family:"Instrument Serif",serif;font-style:italic;font-size:2.4rem;line-height:1;color:var(--graph)}
+.stage.v .num{color:var(--vector)}
+.stage h4{font-family:"Instrument Serif",serif;font-weight:400;font-size:1.5rem;color:var(--ink);margin-bottom:.2rem}
+.stage p{font-size:1.01rem;color:var(--ink-soft)}
+.stage .code{font-family:var(--mono);font-size:.78rem;color:var(--ink-faint);margin-top:.6rem;display:block;white-space:pre-wrap;line-height:1.6}
+.stage .code b{color:var(--vector);font-weight:400}
+.stage .code i{color:var(--graph);font-style:normal}
+
+/* substrate cards */
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:2rem}
+@media(max-width:860px){.cards{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.cards{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.2rem 1.3rem;transition:transform .25s,border-color .25s,box-shadow .25s}
+.card:hover{transform:translateY(-3px);border-color:var(--line-strong);box-shadow:0 18px 40px -28px rgba(0,0,0,.8)}
+.card .ct{font-family:var(--mono);font-size:.84rem;color:var(--ink);display:flex;align-items:center;gap:.5rem}
+.dot{width:9px;height:9px;border-radius:999px;flex:none}
+.card p{margin-top:.5rem;font-size:.92rem;color:var(--ink-soft);line-height:1.48}
+
+/* worked example */
+.ex{margin-top:2rem;display:grid;grid-template-columns:1fr 1fr;gap:1.1rem}
+@media(max-width:780px){.ex{grid-template-columns:1fr}}
+.exbox{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.4rem 1.5rem}
+.exbox .q{font-family:"Instrument Serif",serif;font-style:italic;font-size:1.35rem;color:var(--ink);margin-bottom:.8rem}
+.row{display:flex;justify-content:space-between;gap:1rem;font-family:var(--mono);font-size:.82rem;padding:.4rem 0;border-top:1px dashed var(--line)}
+.row:first-of-type{border-top:0}
+.row .k{color:var(--ink-soft)}
+.row .val{color:var(--ink)}
+.bar{height:7px;border-radius:5px;background:rgba(166,161,210,.14);overflow:hidden;margin-top:.15rem}
+.bar i{display:block;height:100%;border-radius:5px}
+.win{color:var(--vector)}
+.drop{color:var(--ink-faint)}
+.note{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);margin-top:.9rem;line-height:1.6}
+
+/* thresholds table */
+.tbl{margin-top:2rem;width:100%;border-collapse:collapse;font-size:.95rem}
+.tbl th,.tbl td{text-align:left;padding:.7rem .8rem;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl th{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);font-weight:500}
+.tbl td.k{font-family:var(--mono);font-size:.82rem;color:var(--vector);white-space:nowrap}
+.tbl td.d{font-family:var(--mono);font-size:.82rem;color:var(--graph)}
+.tbl td.x{color:var(--ink-soft)}
+.tbl tr:hover td{background:rgba(141,133,255,.04)}
+
+footer{border-top:1px solid var(--line-strong);padding:2.6rem 0 3.6rem;margin-top:1rem}
+footer .wrap{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:1rem;font-family:var(--mono);font-size:.72rem;letter-spacing:.05em;color:var(--ink-faint)}
+footer b{font-family:"Instrument Serif",serif;font-style:italic;font-size:1.4rem;color:var(--ink)}
+
+/* load reveal */
+.reveal{opacity:0;transform:translateY(24px);transition:opacity .8s cubic-bezier(.2,.7,.2,1),transform .8s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+.hero .eyebrow,.hero h1,.hero .lede,.hero .keyline{opacity:0;animation:rise .9s cubic-bezier(.2,.7,.2,1) forwards}
+.hero h1{animation-delay:.08s}.hero .lede{animation-delay:.18s}.hero .keyline{animation-delay:.28s}
+@keyframes rise{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <div class="brand">
+      <svg class="g" viewBox="0 0 24 24"><g fill="none" stroke-width="1.5"><path d="M5 6 L18 4 M5 6 L9 17 M18 4 L9 17 M18 4 L20 14 M9 17 L20 14" stroke="#8d85ff"/></g><g><circle cx="5" cy="6" r="2.1" fill="#f2a93b"/><circle cx="18" cy="4" r="2.1" fill="#1bccbf"/><circle cx="9" cy="17" r="2.1" fill="#1bccbf"/><circle cx="20" cy="14" r="2.1" fill="#f2a93b"/></g></svg>
+      <span><b>WikiGraph</b> · technical logic</span>
+    </div>
+    <nav class="nav">
+      <a href="#thesis">thesis</a>
+      <a href="#chart">flowchart</a>
+      <a href="#stages">stages</a>
+      <a href="#substrate">substrate</a>
+      <a href="#example">example</a>
+      <a href="#ref">thresholds</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">retrieval internals · graphRAG on InterSystems IRIS</p>
+    <h1>Two searches,<br>one <em>graph</em>&#8202;&#8202;&times;&#8202;&#8202;<span class="v">vector</span> decision.</h1>
+    <p class="lede">WikiGraph never runs a blind similarity search. The <b>graph</b> resolves <em>which</em> entity you mean, and that answer <b>scopes</b> the <span style="color:var(--vector)">vector</span> search over the text. This is how the two layers think together — annotated against the real code.</p>
+    <div class="keyline">
+      <span class="a">graph · GraphKB.Entity · descVector</span>
+      <span class="t">vector · GraphKB.Chunk · chunkVector</span>
+      <span>VECTOR_COSINE · HNSW · 1024-d</span>
+    </div>
+  </div>
+</header>
+
+<section id="thesis">
+  <div class="wrap reveal">
+    <p class="kicker"><b>01</b> &nbsp;the thesis</p>
+    <h2>The graph is a filter, not a footnote.</h2>
+    <p class="section-lede">Most RAG retrieves chunks by raw cosine similarity and hopes the right ones float up. That blurs namesakes — &ldquo;Tesla&rdquo; the company and the inventor sit close in vector space. WikiGraph runs <b>graph-first</b>: it scores the question against entity vectors, keeps the dominant sense, and restricts the chunk search to <em>that sense&rsquo;s documents</em>. The vector layer never sees the rival meaning.</p>
+    <div class="duo">
+      <div class="lane graph">
+        <p class="tg">▲ graph layer</p>
+        <h3>resolve the meaning</h3>
+        <p>Embed the question, compare it to every <span class="m g">Entity.descVector</span>, and keep the entities within a cosine margin of the best one. Their documents become the <i>scope</i>.</p>
+        <p class="fn">operations.py · knowledgeOperation.searchEntities()</p>
+      </div>
+      <div class="lane vector">
+        <p class="tg">● vector layer</p>
+        <h3>read the evidence</h3>
+        <p>Embed the same question, compare it to <span class="m">Chunk.chunkVector</span> — but only for chunks <em>inside the scoped documents</em> — and return the top&nbsp;K passages as evidence.</p>
+        <p class="fn">operations.py · knowledgeOperation.searchChunks()</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="chart">
+  <div class="wrap reveal">
+    <p class="kicker"><b>02</b> &nbsp;the flowchart</p>
+    <h2>How a question becomes a scoped search.</h2>
+    <p class="section-lede">One embedding feeds both lanes. The <span style="color:var(--graph)">amber</span> graph lane produces a set of in-scope documents; that set crosses over to constrain the <span style="color:var(--vector)">teal</span> vector lane (the dashed bridge). The lanes then merge into one context object for the LLM.</p>
+
+    <div class="chart">
+      <svg viewBox="0 0 940 1300" role="img" aria-labelledby="ct cd">
+        <title id="ct">WikiGraph graph-first, entity-scoped retrieval flow</title>
+        <desc id="cd">The user question is embedded into a query vector that feeds two lanes. The graph lane scores entities, applies a margin cutoff to pick the winning sense, and collects their documents as a scope. That scope filters the vector lane's chunk search. A widen step protects recall, relationships expand one hop, and everything merges into a context object. A threshold decides whether to answer or to learn from Wikipedia first.</desc>
+        <defs>
+          <marker id="aGray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#6d6896" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="aAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#f2a93b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="aTeal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#1bccbf" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="aCoral" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#ff6b6b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <linearGradient id="bridge" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#f2a93b"/><stop offset="1" stop-color="#1bccbf"/>
+          </linearGradient>
+        </defs>
+
+        <!-- lane headers -->
+        <text class="fsub" x="210" y="232" text-anchor="middle" fill="#f2a93b" letter-spacing="2">▲ GRAPH LANE</text>
+        <text class="fsub" x="730" y="232" text-anchor="middle" fill="#1bccbf" letter-spacing="2">● VECTOR LANE</text>
+        <line x1="470" y1="250" x2="470" y2="1010" stroke="rgba(166,161,210,.10)" stroke-width="1" stroke-dasharray="2 6"/>
+
+        <!-- question -->
+        <rect x="320" y="20" width="300" height="60" rx="11" fill="#1c1a39" stroke="#8d85ff" stroke-width="1.3"/>
+        <text class="flabel" x="470" y="46" text-anchor="middle" fill="#eceafe" font-weight="600">user question</text>
+        <text class="fsub" x="470" y="64" text-anchor="middle" fill="#a6a1d2">“tell me about Tesla, the car company”</text>
+
+        <!-- embed -->
+        <path d="M470 80 L470 116" stroke="#6d6896" stroke-width="1.4" marker-end="url(#aGray)"/>
+        <text class="fsub" x="486" y="102" fill="#8d85ff">EMBEDDING(q,'wikiembed') → Ollama</text>
+
+        <rect x="345" y="118" width="250" height="58" rx="11" fill="#171530" stroke="#8d85ff" stroke-width="1.2"/>
+        <text class="flabel" x="470" y="143" text-anchor="middle" fill="#eceafe" font-weight="600">query vector  q&#8407;</text>
+        <text class="fsub" x="470" y="161" text-anchor="middle" fill="#a6a1d2">1024-dimensional · cosine space</text>
+
+        <!-- split to both lanes -->
+        <path d="M420 176 C 360 196, 250 196, 210 248" fill="none" stroke="#f2a93b" stroke-width="1.5" marker-end="url(#aAmber)"/>
+        <path d="M520 176 C 600 196, 720 196, 730 408" fill="none" stroke="#1bccbf" stroke-width="1.5" marker-end="url(#aTeal)"/>
+
+        <!-- GRAPH: searchEntities -->
+        <rect x="40" y="252" width="340" height="96" rx="12" fill="#16142d" stroke="#f2a93b" stroke-width="1.3"/>
+        <text class="flabel" x="60" y="280" fill="#f2a93b" font-weight="700">①  searchEntities</text>
+        <text class="fsub" x="60" y="302" fill="#cfc9f1">VECTOR_COSINE( Entity.descVector , q&#8407; )</text>
+        <text class="fsub" x="60" y="320" fill="#a6a1d2">TOP 8, ordered by score</text>
+        <text class="fsub" x="60" y="337" fill="#a6a1d2">keep score &#8805; entityFloor (0.30)</text>
+
+        <path d="M210 348 L210 384" stroke="#f2a93b" stroke-width="1.5" marker-end="url(#aAmber)"/>
+
+        <!-- GRAPH: margin cutoff -->
+        <rect x="40" y="386" width="340" height="96" rx="12" fill="#16142d" stroke="#f2a93b" stroke-width="1.3"/>
+        <text class="flabel" x="60" y="414" fill="#f2a93b" font-weight="700">②  margin cutoff</text>
+        <text class="fsub" x="60" y="436" fill="#cfc9f1">keep score &#8805; topScore &#8722; scopeMargin (0.12)</text>
+        <text class="fsub" x="60" y="454" fill="#a6a1d2">→ the winning sense survives,</text>
+        <text class="fsub" x="60" y="471" fill="#a6a1d2">   rival senses are dropped</text>
+
+        <path d="M210 482 L210 518" stroke="#f2a93b" stroke-width="1.5" marker-end="url(#aAmber)"/>
+
+        <!-- GRAPH: scope documents -->
+        <rect x="40" y="520" width="340" height="86" rx="12" fill="#1c1a39" stroke="#f2a93b" stroke-width="1.6"/>
+        <text class="flabel" x="60" y="548" fill="#f2a93b" font-weight="700">③  scope = documents</text>
+        <text class="fsub" x="60" y="570" fill="#cfc9f1">documentRef of every in-scope entity</text>
+        <text class="fsub" x="60" y="588" fill="#a6a1d2">a small set of article ids</text>
+
+        <!-- THE BRIDGE: graph filters vector -->
+        <path class="dashflow" d="M380 562 L560 562" fill="none" stroke="url(#bridge)" stroke-width="3.4" marker-end="url(#aTeal)"/>
+        <text class="fsub" x="470" y="552" text-anchor="middle" fill="#1bccbf" font-weight="700">scopeDocs ⟶ graph filter</text>
+
+        <!-- VECTOR: searchChunks -->
+        <rect x="560" y="410" width="340" height="118" rx="12" fill="#16142d" stroke="#1bccbf" stroke-width="1.3"/>
+        <text class="flabel" x="580" y="438" fill="#1bccbf" font-weight="700">④  searchChunks</text>
+        <text class="fsub" x="580" y="460" fill="#bdeee9">VECTOR_COSINE( Chunk.chunkVector , q&#8407; )</text>
+        <text class="fsub" x="580" y="478" fill="#f2a93b" font-weight="600">WHERE documentRef IN scopeDocs</text>
+        <text class="fsub" x="580" y="496" fill="#a6a1d2">ORDER BY score DESC · TOP K = 5</text>
+        <text class="fsub" x="580" y="514" fill="#a6a1d2">bestScore = max(chunk scores)</text>
+
+        <path d="M730 528 L730 566" stroke="#1bccbf" stroke-width="1.5" marker-end="url(#aTeal)"/>
+
+        <!-- VECTOR: widen decision -->
+        <rect x="585" y="568" width="290" height="74" rx="12" fill="#16142d" stroke="#1bccbf" stroke-width="1.2" stroke-dasharray="5 4"/>
+        <text class="flabel" x="730" y="595" text-anchor="middle" fill="#1bccbf" font-weight="700">bestScore &lt; scopeFloor (0.45) ?</text>
+        <text class="fsub" x="730" y="615" text-anchor="middle" fill="#a6a1d2">yes → re-search across ALL documents</text>
+        <text class="fsub" x="730" y="631" text-anchor="middle" fill="#a6a1d2">(protect recall if the scope was too thin)</text>
+
+        <!-- widen loop back to chunk search -->
+        <path d="M875 596 C 916 580, 916 470, 902 466" fill="none" stroke="#1bccbf" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#aTeal)"/>
+
+        <!-- entityIds feed relationship expansion -->
+        <path d="M120 606 C 120 690, 150 700, 188 724" fill="none" stroke="#f2a93b" stroke-width="1.4" marker-end="url(#aAmber)"/>
+        <text class="fsub" x="92" y="664" fill="#f2a93b">entityIds</text>
+
+        <!-- GRAPH: expandRelationships -->
+        <rect x="150" y="726" width="330" height="92" rx="12" fill="#16142d" stroke="#f2a93b" stroke-width="1.3"/>
+        <text class="flabel" x="170" y="754" fill="#f2a93b" font-weight="700">⑤  expandRelationships</text>
+        <text class="fsub" x="170" y="776" fill="#cfc9f1">1-hop over GraphKB.Relationship</text>
+        <text class="fsub" x="170" y="794" fill="#a6a1d2">edges among the matched entities</text>
+        <text class="fsub" x="170" y="811" fill="#a6a1d2">source → predicate → target</text>
+
+        <!-- chunks feed merge -->
+        <path d="M730 642 C 730 720, 640 740, 602 866" fill="none" stroke="#1bccbf" stroke-width="1.5" marker-end="url(#aTeal)"/>
+        <text class="fsub" x="700" y="724" fill="#1bccbf">chunks</text>
+        <!-- relationships feed merge -->
+        <path d="M340 818 C 360 850, 380 856, 410 866" fill="none" stroke="#f2a93b" stroke-width="1.5" marker-end="url(#aAmber)"/>
+
+        <!-- MERGE: context -->
+        <rect x="320" y="868" width="300" height="92" rx="12" fill="#1c1a39" stroke="#8d85ff" stroke-width="1.5"/>
+        <text class="flabel" x="470" y="896" text-anchor="middle" fill="#eceafe" font-weight="700">⑥  assemble context</text>
+        <text class="fsub" x="470" y="918" text-anchor="middle" fill="#cfc9f1">{ chunks · entities · relationships }</text>
+        <text class="fsub" x="470" y="936" text-anchor="middle" fill="#a6a1d2">serialized to JSON for the LLM</text>
+        <text class="fsub" x="470" y="953" text-anchor="middle" fill="#a6a1d2">returns bestScore upstream</text>
+
+        <path d="M470 960 L470 998" stroke="#6d6896" stroke-width="1.5" marker-end="url(#aGray)"/>
+
+        <!-- DECISION: learn? -->
+        <rect x="300" y="1000" width="340" height="70" rx="12" fill="#16142d" stroke="#ff6b6b" stroke-width="1.3"/>
+        <text class="flabel" x="470" y="1028" text-anchor="middle" fill="#ff6b6b" font-weight="700">bestScore &lt; similarityThreshold (0.55) ?</text>
+        <text class="fsub" x="470" y="1048" text-anchor="middle" fill="#a6a1d2">decided in chatProcess, not here</text>
+        <text class="fsub" x="470" y="1063" text-anchor="middle" fill="#a6a1d2">no → answer · yes → learn first</text>
+
+        <!-- learn branch -->
+        <path d="M300 1035 C 170 1035, 120 1035, 120 1120" fill="none" stroke="#ff6b6b" stroke-width="1.5" marker-end="url(#aCoral)"/>
+        <text class="fsub" x="150" y="1028" fill="#ff6b6b">yes</text>
+        <rect x="40" y="1122" width="300" height="92" rx="12" fill="#1c1a39" stroke="#ff6b6b" stroke-width="1.3"/>
+        <text class="flabel" x="60" y="1150" fill="#ff6b6b" font-weight="700">LEARN, then re-search</text>
+        <text class="fsub" x="60" y="1172" fill="#cfc9f1">wikipediaOperation → ingestProcess</text>
+        <text class="fsub" x="60" y="1190" fill="#a6a1d2">embed chunks + extract entities,</text>
+        <text class="fsub" x="60" y="1207" fill="#a6a1d2">then run ①–⑥ again on the richer graph</text>
+        <!-- learn loops back up -->
+        <path d="M40 1168 C 14 1168, 14 300, 38 300" fill="none" stroke="#ff6b6b" stroke-width="1.1" stroke-dasharray="4 5" marker-end="url(#aCoral)"/>
+
+        <!-- answer branch -->
+        <path d="M470 1070 L470 1118" stroke="#1bccbf" stroke-width="1.6" marker-end="url(#aTeal)"/>
+        <text class="fsub" x="486" y="1100" fill="#1bccbf">no</text>
+        <rect x="330" y="1120" width="280" height="70" rx="12" fill="#16142d" stroke="#1bccbf" stroke-width="1.4"/>
+        <text class="flabel" x="470" y="1150" text-anchor="middle" fill="#eceafe" font-weight="700">llmOperation → grounded answer</text>
+        <text class="fsub" x="470" y="1170" text-anchor="middle" fill="#a6a1d2">gemma4:e2b · think:false · answers in q&rsquo;s language</text>
+      </svg>
+
+      <div class="legend">
+        <span><span class="sw" style="border-color:#f2a93b"></span>graph search · entities &amp; relationships</span>
+        <span><span class="sw" style="border-color:#1bccbf"></span>vector search · chunk similarity</span>
+        <span><span class="sw dashflow" style="border-image:linear-gradient(90deg,#f2a93b,#1bccbf) 1;border-color:#1bccbf"></span>the graph filter (scope bridge)</span>
+        <span><span class="sw" style="border-color:#ff6b6b"></span>learning loop</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="stages">
+  <div class="wrap reveal">
+    <p class="kicker"><b>03</b> &nbsp;stage by stage</p>
+    <h2>The six steps, against the code.</h2>
+    <p class="section-lede">Everything below lives in <code>knowledgeOperation.onSearch()</code> in <span class="m">operations.py</span>, called synchronously by <span class="m">chatProcess</span> for every question.</p>
+    <div class="stages">
+      <div class="stage">
+        <div class="num">1</div>
+        <div>
+          <h4>Match the entities — by vector <em>and</em> by name</h4>
+          <p>The question is embedded once and compared to every entity&rsquo;s description vector; entities at or above <span class="m g">entityFloor</span> (0.30) are considered &ldquo;about&rdquo; it. <b>In parallel</b>, any entity whose <em>full name literally appears</em> in the question is matched too (<span class="m g">nameMatch</span>) — so an explicitly-named entity that embeds weakly (e.g. one of three astronauts in a list) is never lost.</p>
+          <span class="code">SELECT TOP 8 e.%ID, …, <b>VECTOR_COSINE(e.descVector, <i>EMBEDDING(?,'wikiembed')</i>)</b> AS score
+FROM GraphKB.Entity e WHERE e.lang = ? AND e.descVector IS NOT NULL ORDER BY score DESC
+<i>-- plus: WHERE UPPER(?) LIKE ('%' || UPPER(e.entityName) || '%')  (lexical name match)</i></span>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num">2</div>
+        <div>
+          <h4>Keep only the winning sense</h4>
+          <p>Rows are already ordered by score, so the cutoff is <span class="m g">topScore &minus; scopeMargin</span> (0.12). Entities within that band are &ldquo;in scope&rdquo;; a dominant match excludes its namesake. A tight margin means one sense wins; a wider margin lets co-relevant senses through.</p>
+          <span class="code">cutoff = matched[0].score &minus; scopeMargin
+inScope = [ e for e in matched if e.score &#8805; cutoff ]</span>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num">3</div>
+        <div>
+          <h4>Collect their documents</h4>
+          <p>Each in-scope entity carries a <span class="m g">documentRef</span> back to the article it came from. The distinct set of those ids becomes the scope — the bridge handed to the vector lane.</p>
+        </div>
+      </div>
+      <div class="stage v">
+        <div class="num">4</div>
+        <div>
+          <h4>Search chunks — two ways, then merge</h4>
+          <p>Two cosine searches over <span class="m">Chunk.chunkVector</span> run and are merged (dedup, best score, capped at <span class="m">maxChunks</span>):</p>
+          <p><b>(a) document-scoped</b> — confined to the winning sense&rsquo;s articles via <span class="m g">documentRef IN (scopeDocs)</span>, top <span class="m">searchTopK</span> (5).
+          <b>(b) per-entity</b> — for <em>each</em> matched/named entity, its top <span class="m">perEntityChunks</span> chunks among those that <span class="m g">mention it (EntityMention)</span>, so every named entity contributes evidence from whatever article actually describes it.</p>
+          <span class="code"><i>(b)</i> … <b>VECTOR_COSINE(c.chunkVector, <i>EMBEDDING(?,'wikiembed')</i>)</b> AS score
+FROM GraphKB.Chunk c JOIN <i>GraphKB.EntityMention em ON em.chunkRef = c.%ID</i>
+WHERE <i>em.entityRef = ?</i> ORDER BY score DESC</span>
+        </div>
+      </div>
+      <div class="stage v">
+        <div class="num">5</div>
+        <div>
+          <h4>Widen if the scope was too tight</h4>
+          <p>Over-narrow scoping can starve recall — and the upstream &ldquo;do I need to learn?&rdquo; decision with it. If the best scoped chunk is below <span class="m">scopeFloor</span> (0.45), the search re-runs across <em>all</em> documents and keeps whichever result is stronger.</p>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num">6</div>
+        <div>
+          <h4>Expand the graph, then merge</h4>
+          <p>A 1-hop walk over <span class="m g">GraphKB.Relationship</span> among the matched entities adds typed facts (<span class="m g">source → predicate → target</span>). Chunks, entities and relationships are packed into one JSON context; <span class="m">bestScore</span> is returned so <span class="m">chatProcess</span> can decide whether to answer or to learn.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="substrate">
+  <div class="wrap reveal">
+    <p class="kicker"><b>04</b> &nbsp;the substrate</p>
+    <h2>Both searches run inside IRIS.</h2>
+    <p class="section-lede">There is no external vector store. Text becomes vectors through the IRIS <code>EMBEDDING</code> datatype (config <span class="m">wikiembed</span>) backed by <span class="m">%Embedding.OpenAI</span> pointed at Ollama&rsquo;s <span class="m">/v1/embeddings</span> — so every <code>EMBEDDING()</code> is a fast HTTP call, not an in-process model load. Similarity is <code>VECTOR_COSINE</code> over HNSW indexes.</p>
+    <div class="cards">
+      <div class="card"><div class="ct"><span class="dot" style="background:#f2a93b"></span>GraphKB.Entity</div><p><span class="m g">descVector</span> drives the graph lane. Deduped on <span class="m">name + type + lang</span> so senses stay separate; <span class="m">documentRef</span> ties each to its article. HNSW + cosine.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#1bccbf"></span>GraphKB.Chunk</div><p><span class="m">chunkVector</span> drives the vector lane. It embeds <span class="m">embedText</span> — the passage <em>prefixed with the article title</em> — which separates senses in vector space; <span class="m">chunkText</span> stays clean for display.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#f2a93b"></span>GraphKB.Relationship · EntityMention</div><p><span class="m g">Relationship</span> = typed edges (1-hop expansion enriches context). <span class="m g">EntityMention</span> links each entity to the chunks that mention it — the bridge the per-entity search follows to pull evidence across documents.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#8d85ff"></span>EMBEDDING · wikiembed</div><p><span class="m">%Embedding.OpenAI</span> → Ollama, 1024-dim. The model (<span class="m">harrier-0.6b</span>, multilingual) is configurable via <span class="m">EMBEDDING_MODEL</span>; <span class="m">bge-m3</span> also fits.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#1bccbf"></span>VECTOR_COSINE · HNSW</div><p>Both lanes use the same operator and the same query vector — only the row set differs. HNSW indexes (<span class="m">Distance='Cosine'</span>) keep the search fast as the graph grows.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#ff6b6b"></span>chatProcess</div><p>Owns the loop: search → (learn if weak) → re-search → answer, writing <span class="m">pending→searching→learning→answering→done</span> so the UI can follow along.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="example">
+  <div class="wrap reveal">
+    <p class="kicker"><b>05</b> &nbsp;worked example</p>
+    <h2>Why &ldquo;Tesla&rdquo; lands on the company.</h2>
+    <p class="section-lede">Illustrative cosine scores for one ambiguous question — the mechanism is what matters, not the exact decimals.</p>
+    <div class="ex">
+      <div class="exbox">
+        <p class="q">“tell me about Tesla, the car company”</p>
+        <div class="row"><span class="k">Tesla, Inc. &nbsp;<span class="win">⟵ top</span></span><span class="val win">0.71</span></div>
+        <div class="bar"><i style="width:71%;background:#1bccbf"></i></div>
+        <div class="row"><span class="k">Nikola Tesla</span><span class="val drop">0.58</span></div>
+        <div class="bar"><i style="width:58%;background:#6d6896"></i></div>
+        <div class="row"><span class="k">Tesla (unit)</span><span class="val drop">0.41</span></div>
+        <div class="bar"><i style="width:41%;background:#6d6896"></i></div>
+        <p class="note">cutoff = 0.71 &minus; scopeMargin 0.12 = <b style="color:#f2a93b">0.59</b><br>only <b style="color:#1bccbf">Tesla,&nbsp;Inc.</b> clears it → its document is the only scope</p>
+      </div>
+      <div class="exbox">
+        <p class="q">the vector lane, now constrained</p>
+        <div class="row"><span class="k">chunks searched</span><span class="val">only Tesla,&nbsp;Inc. article</span></div>
+        <div class="row"><span class="k">Nikola Tesla chunks</span><span class="val drop">never considered</span></div>
+        <div class="row"><span class="k">top chunk score</span><span class="val win">0.68 &#8805; scopeFloor</span></div>
+        <div class="row"><span class="k">widen?</span><span class="val">no — scope held</span></div>
+        <div class="row"><span class="k">relationships</span><span class="val">founded-by, makes, headquartered-in…</span></div>
+        <div class="row"><span class="k">learn?</span><span class="val">0.68 &#8805; 0.55 → answer now</span></div>
+        <p class="note">had the company not cleared the margin, both senses&rsquo; documents would stay in scope and the chunk scores would arbitrate — recall is never sacrificed for precision.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="ref">
+  <div class="wrap reveal">
+    <p class="kicker"><b>06</b> &nbsp;the dials</p>
+    <h2>Every threshold, in one place.</h2>
+    <p class="section-lede">All are live settings on the production hosts in the Management Portal — tune them without recompiling.</p>
+    <table class="tbl">
+      <thead><tr><th>setting</th><th>default</th><th>host</th><th>what it governs</th></tr></thead>
+      <tbody>
+        <tr><td class="k">entityFloor</td><td class="d">0.30</td><td class="x">knowledgeOperation</td><td class="x">minimum entity cosine to be considered a match for the question</td></tr>
+        <tr><td class="k">scopeMargin</td><td class="d">0.12</td><td class="x">knowledgeOperation</td><td class="x">how close to the top entity a rival must score to share the scope — smaller = stricter disambiguation</td></tr>
+        <tr><td class="k">scopeFloor</td><td class="d">0.45</td><td class="x">knowledgeOperation</td><td class="x">if the best scoped chunk is weaker than this, widen to all documents</td></tr>
+        <tr><td class="k">nameMatch</td><td class="d">1</td><td class="x">knowledgeOperation</td><td class="x">also match entities whose full name appears in the question (multi-entity coverage); 0 = vector match only</td></tr>
+        <tr><td class="k">perEntityChunks</td><td class="d">2</td><td class="x">knowledgeOperation</td><td class="x">chunks gathered per matched entity via EntityMention, so each named entity contributes; 0 = off</td></tr>
+        <tr><td class="k">maxChunks</td><td class="d">10</td><td class="x">knowledgeOperation</td><td class="x">cap on total chunks after merging the scoped + per-entity searches</td></tr>
+        <tr><td class="k">searchTopK</td><td class="d">5</td><td class="x">chatProcess</td><td class="x">chunks from the document-scoped search (before merge)</td></tr>
+        <tr><td class="k">similarityThreshold</td><td class="d">0.55</td><td class="x">chatProcess</td><td class="x">below this best score, learn from Wikipedia before answering</td></tr>
+        <tr><td class="k">searchCandidates</td><td class="d">5</td><td class="x">wikipediaOperation</td><td class="x">Wikipedia pages reranked to pick the right one when learning</td></tr>
+        <tr><td class="k">maxEmbedChunks</td><td class="d">24</td><td class="x">ingestProcess</td><td class="x">chunks stored &amp; embedded per article</td></tr>
+        <tr><td class="k">maxExtractChunks</td><td class="d">3</td><td class="x">ingestProcess</td><td class="x">chunks the LLM mines for entities &amp; relationships</td></tr>
+        <tr><td class="k">vector length</td><td class="d">1024</td><td class="x">EMBEDDING · HNSW</td><td class="x">dimensionality, fixed by the embedding model and the index</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>WikiGraph — graph-first, entity-scoped GraphRAG on InterSystems IRIS</span>
+    <b>graph &times; vector</b>
+  </div>
+</footer>
+
+<script>
+const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{threshold:.1});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>

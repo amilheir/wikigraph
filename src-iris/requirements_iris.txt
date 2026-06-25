@@ -1,0 +1,5 @@
+pandas
+intersystems-irispython
+intersystems-pyprod
+flask
+requests

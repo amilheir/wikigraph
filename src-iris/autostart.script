@@ -1,0 +1,4 @@
+zn "GRAPHRAG"
+set sc = ##class(Ens.Director).SetAutoStart("WikiGraph.wikiGraphProduction")
+write !,"SetAutoStart: ",$SYSTEM.Status.GetErrorText(sc),!
+halt
