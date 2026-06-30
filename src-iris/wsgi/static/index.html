@@ -19,7 +19,8 @@
   --gold: #00a9c7;
   --rule: rgba(17, 43, 77, .25);
   --card: #ffffff;
-  --shadow: 0 2px 0 rgba(17,43,77,.06), 0 18px 40px -22px rgba(17,43,77,.45);
+  --shadow: 3px 3px 0 rgba(17,43,77,.3);
+  /*--shadow: 0 2px 0 rgba(17,43,77,.06), 0 18px 40px -22px rgba(17,43,77,.45);*/
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -52,6 +53,7 @@ header {
   position: sticky;
   top: 0;
   z-index: 5;
+  box-shadow: 0 2px 0 rgba(17,43,77,.15);
 }
 .masthead {
   max-width: 880px;
@@ -83,7 +85,7 @@ h1 .graph { color: var(--oxblood); font-style: italic; }
   border-radius: 10px;
   overflow: hidden;
   background: var(--card);
-
+  box-shadow: var(--shadow);
 }
 .langToggle button {
   font-family: "Newsreader", Georgia, serif;
@@ -122,6 +124,7 @@ h1 .graph { color: var(--oxblood); font-style: italic; }
   color: var(--ink);
   cursor: pointer;
   transition: all .18s ease;
+  box-shadow: var(--shadow);
 }
 .menuBtn:hover { background: var(--ink); color: var(--card); }
 .menuBtn:active { transform: translateY(1px); }
@@ -169,7 +172,7 @@ h1 .graph { color: var(--oxblood); font-style: italic; }
   width: max-content;
   background: var(--card);
   border-left: 1.5px solid var(--rule);
-  box-shadow: -22px 0 50px -28px rgba(17,43,77,.55);
+  box-shadow: -5px 0 2px rgba(17,43,77,.15);
   transform: translateX(100%);
   transition: transform .28s cubic-bezier(.4,0,.2,1);
   z-index: 40;
@@ -215,7 +218,7 @@ h1 .graph { color: var(--oxblood); font-style: italic; }
 .panelSection #articleSelect { max-width: max-content; }
 .kbActions { display: flex; align-items: center; gap: .55rem; }
 .panelSection .kbActions { align-self: flex-start; }
-.kbAdd { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1.5rem; margin-top: 1.5rem; }
+.kbAdd { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 0.5rem; margin-top: 1.5rem; }
 #addLabel { font-variant: small-caps; letter-spacing: .12em; color: var(--ink); font-size: .8rem; }
 .kbAddRow { display: flex; gap: .5rem; align-items: center; }
 #addTitle { flex: 1; min-width: 160px; font-family: "Newsreader", Georgia, serif; font-size: .92rem; color: var(--ink);
@@ -223,11 +226,23 @@ h1 .graph { color: var(--oxblood); font-style: italic; }
 #addTitle::placeholder { color: var(--ink); font-style: italic; }
 #addBtn { font-family: "Newsreader", Georgia, serif; font-weight: 700; font-size: .8rem; letter-spacing: .06em; color: var(--ink);
   background: var(--card); border: 1.5px solid var(--ink); border-radius: 10px; padding: .44rem 1.1rem;
-  cursor: pointer; white-space: nowrap; box-shadow: none; transition: all .2s ease; }
+  cursor: pointer; white-space: nowrap; box-shadow: var(--shadow); transition: all .2s ease; }
 #addBtn:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
 #addBtn:active:not(:disabled) { transform: translateY(1px); }
 #addBtn:disabled { opacity: .5; cursor: wait; }
 .addStatus { font-size: .85rem; color: var(--ink); min-height: 1.1em; line-height: 1.4; }
+.kbResolve { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1rem; }
+#resolveLabel { font-variant: small-caps; letter-spacing: .12em; color: var(--ink-soft); font-size: .8rem; }
+#previewMergeBtn, #applyMergeBtn { font-family: "Newsreader", Georgia, serif; font-weight: 700; font-size: .8rem; letter-spacing: .06em; color: var(--ink); background: var(--card); border: 1.5px solid var(--ink); border-radius: 10px; padding: .44rem 1.1rem; cursor: pointer; white-space: nowrap; box-shadow: var(--shadow); transition: all .2s ease; }
+#previewMergeBtn:hover:not(:disabled), #applyMergeBtn:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
+#previewMergeBtn:disabled, #applyMergeBtn:disabled { opacity: .5; cursor: not-allowed; }
+.resolveReport { display: flex; flex-direction: column; gap: .3rem; }
+.resolveReport .mergeRow { font-size: .88rem; color: var(--ink-soft); line-height: 1.4; padding: .3rem .5rem;
+  background: var(--paper); border-radius: 8px; }
+.resolveReport .mergeRow b { color: var(--ink); }
+.resolveReport label.mergeRow { display: flex; align-items: flex-start; gap: .5rem; cursor: pointer; }
+.resolveReport label.mergeRow input { margin-top: .25rem; accent-color: var(--oxblood); flex: none; }
+.resolveReport label.mergeRow:has(input:not(:checked)) { opacity: .5; text-decoration: line-through; }
 .panelSection .kbStats { margin-top: 1.2rem; margin-left: 0.rem; text-align: left; }
 
 /* documentation panel: full-bleed iframe of the standalone overview document */
@@ -295,6 +310,7 @@ h1 .graph { color: var(--oxblood); font-style: italic; }
   cursor: pointer;
   transition: all .18s ease;
   white-space: nowrap;
+  box-shadow: var(--shadow);
 }
 #deleteBtn:hover:not(:disabled) { background: #b3261e; color: #fff; }
 #deleteBtn:active:not(:disabled) { transform: translateY(1px); }
@@ -313,6 +329,7 @@ h1 .graph { color: var(--oxblood); font-style: italic; }
   cursor: pointer;
   transition: all .18s ease;
   white-space: nowrap;
+  box-shadow: var(--shadow);
 }
 #deleteAllBtn:hover:not(:disabled) { background: #b3261e; color: #fff; }
 #deleteAllBtn:active:not(:disabled) { transform: translateY(1px); }
@@ -373,6 +390,16 @@ main {
   box-shadow: var(--shadow);
 }
 .msg.bot .bubble.error { border-left-color: #b3261e; color: #7a1d16; }
+.msg.bot .bubble strong { font-weight: 700; color: var(--ink); }
+.msg.bot .bubble em { font-style: italic; }
+.msg.bot .bubble code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em;
+  background: rgba(17,43,77,.08); padding: .05em .35em; border-radius: 5px; }
+.msg.bot .bubble pre { background: rgba(17,43,77,.08); border-radius: 8px; padding: .55rem .75rem;
+  margin: .35rem 0; overflow-x: auto; }
+.msg.bot .bubble pre code { background: none; padding: 0; }
+.msg.bot .bubble ul { margin: .35rem 0; padding-left: 1.3rem; }
+.msg.bot .bubble li { margin: .12rem 0; }
+.msg.bot .bubble a { color: var(--oxblood); text-decoration: underline; }
 
 .statusBubble {
   display: inline-flex;
@@ -436,7 +463,7 @@ footer {
   border-radius: 10px;
   padding: .6rem 1.3rem;
   cursor: pointer;
-  box-shadow: none;
+  box-shadow: var(--shadow);
   transition: all .2s ease;
 }
 .composer button:hover { background: var(--ink); color: var(--paper);}
@@ -519,6 +546,15 @@ footer {
         </div>
         <div class="addStatus" id="addStatus"></div>
       </div>
+      <div class="kbResolve">
+        <label id="resolveLabel">Clean up duplicate entities:</label>
+        <div class="kbActions">
+          <button id="previewMergeBtn" type="button">Preview merges</button>
+          <button id="applyMergeBtn" type="button" disabled>Merge duplicates</button>
+        </div>
+        <div class="addStatus" id="resolveStatus"></div>
+        <div class="resolveReport" id="resolveReport"></div>
+      </div>
     </section>
   </div>
 </aside>
@@ -548,6 +584,10 @@ const deleteAllBtn = document.getElementById("deleteAllBtn");
 const addTitle = document.getElementById("addTitle");
 const addBtn = document.getElementById("addBtn");
 const addStatus = document.getElementById("addStatus");
+const previewMergeBtn = document.getElementById("previewMergeBtn");
+const applyMergeBtn = document.getElementById("applyMergeBtn");
+const resolveStatus = document.getElementById("resolveStatus");
+const resolveReport = document.getElementById("resolveReport");
 let kbDocs = [];
 let lang = "en";
 
@@ -566,7 +606,20 @@ const I18N = {
     addPlaceholder: "Wikipedia title(s) — comma-separated for several…",
     addBtn: "Add",
     addWorking: "Adding…",
-    addBatchDone: (ok, fail) => "✓ Added: " + ok + (fail ? " · failed: " + fail : "") + ".",
+    addBatchDone: (ok, fail) => "Added: " + ok + (fail ? " · failed: " + fail : "") + ".",
+    resolveLabel: "Clean up duplicate entities:",
+    previewBtn: "Preview merges",
+    mergeBtn: "Merge duplicates",
+    previewing: "Scanning for duplicates…",
+    merging: "Merging duplicates…",
+    noDupes: "No duplicates found.",
+    previewDone: (n) => "Found " + n + " group(s) to merge — review, then Merge duplicates.",
+    mergeDone: (n) => "Merged " + n + " duplicate entit" + (n === 1 ? "y" : "ies") + ".",
+    aliasesToClean: (n) => n + " noisy alias(es) to clean",
+    aliasesCleaned: (n) => "" + n + " alias(es) cleaned",
+    typesToFix: (n) => n + " type(s) to normalize",
+    typesDone: (n) => "" + n + " type(s) normalized",
+    confirmMerge: "Merge the previewed duplicate groups? This rewrites the knowledge graph and cannot be undone.",
     articleStatsHtml: (doc) => "<p>Selected article: <br> &middot; <b>" + (doc.chunks||0) + "</b> chunks <br> &middot; <b>" + (doc.entities||0) + "</b> entities</p>",
     confirmDeleteAll: (n) => "Delete ALL " + n + " article" + (n===1?"":"s") + " and clear the entire knowledge graph?\n\nThis cannot be undone.",
     clearedAll: (n) => "🗑️ Cleared the knowledge base — " + n + " article" + (n===1?"":"s") + " removed.",
@@ -602,7 +655,20 @@ const I18N = {
     addPlaceholder: "Título(s) da Wikipédia — separados por vírgula…",
     addBtn: "Adicionar",
     addWorking: "Adicionando…",
-    addBatchDone: (ok, fail) => "✓ Adicionados: " + ok + (fail ? " · falharam: " + fail : "") + ".",
+    addBatchDone: (ok, fail) => "Adicionados: " + ok + (fail ? " · falharam: " + fail : "") + ".",
+    resolveLabel: "Limpar entidades duplicadas:",
+    previewBtn: "Pré-visualizar",
+    mergeBtn: "Mesclar duplicadas",
+    previewing: "Procurando duplicadas…",
+    merging: "Mesclando duplicadas…",
+    noDupes: "Nenhuma duplicada encontrada.",
+    previewDone: (n) => n + " grupo(s) para mesclar — revise e clique em Mesclar.",
+    mergeDone: (n) => "" + n + " entidade(s) duplicada(s) mesclada(s).",
+    aliasesToClean: (n) => n + " alias(es) ruidoso(s) a limpar",
+    aliasesCleaned: (n) => "" + n + " alias(es) limpo(s)",
+    typesToFix: (n) => n + " tipo(s) a normalizar",
+    typesDone: (n) => "" + n + " tipo(s) normalizado(s)",
+    confirmMerge: "Mesclar os grupos de duplicadas? Isso reescreve o grafo de conhecimento e não pode ser desfeito.",
     articleStatsHtml: (doc) => "<p>Artigo selecionado: <br> &middot; <b>" + (doc.chunks||0) + "</b> trechos <br> &middot; <b>" + (doc.entities||0) + "</b> entidades</p>",
     confirmDeleteAll: (n) => "Excluir TODOS os " + n + " artigo" + (n===1?"":"s") + " e limpar todo o grafo de conhecimento?\n\nIsso não pode ser desfeito.",
     clearedAll: (n) => "🗑️ Base de conhecimento limpa — " + n + " artigo" + (n===1?"":"s") + " removido" + (n===1?"":"s") + ".",
@@ -643,6 +709,9 @@ function setLang(newLang) {
   document.getElementById("addLabel").textContent = dict.addLabel;
   addTitle.placeholder = dict.addPlaceholder;
   addBtn.textContent = dict.addBtn;
+  document.getElementById("resolveLabel").textContent = dict.resolveLabel;
+  previewMergeBtn.textContent = dict.previewBtn;
+  applyMergeBtn.textContent = dict.mergeBtn;
   deleteBtn.textContent = dict.deleteBtn;
   deleteAllBtn.textContent = dict.deleteAll;
   sendBtn.textContent = dict.ask;
@@ -726,12 +795,54 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") { closeMenu(); closePanel(); }
 });
 
+// minimal, safe markdown for the bot's answer: escape HTML first, then a small subset
+// (bold, italic, inline/fenced code, links, bullet lists, headings). The answer comes from the LLM.
+function mdInline(s) {
+  return s
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_\n]+)__/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+             '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+
+function renderMarkdown(src) {
+  const esc = (src || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // pull out fenced code blocks first so their contents aren't touched by inline rules
+  const blocks = [];
+  let body = esc.replace(/```[a-z]*\n?([\s\S]*?)```/gi, (m, code) => {
+    blocks.push("<pre><code>" + code.replace(/\n$/, "") + "</code></pre>");
+    return " " + (blocks.length - 1) + " ";
+  });
+  const lines = body.split(/\r?\n/);
+  let out = "", inList = false;
+  for (const line of lines) {
+    const bullet = line.match(/^\s*[-*•]\s+(.+)/);
+    const heading = line.match(/^\s*(#{1,6})\s+(.+)/);
+    if (bullet) {
+      if (!inList) { out += "<ul>"; inList = true; }
+      out += "<li>" + mdInline(bullet[1]) + "</li>";
+      continue;
+    }
+    if (inList) { out += "</ul>"; inList = false; }
+    if (heading) out += "<strong>" + mdInline(heading[2]) + "</strong><br>";
+    else if (line.trim() === "") out += "<br>";
+    else out += mdInline(line) + "<br>";
+  }
+  if (inList) out += "</ul>";
+  // restore fenced code blocks
+  return out.replace(/ (\d+) (<br>)?/g, (m, i) => (blocks[Number(i)] !== undefined ? blocks[Number(i)] : m));
+}
+
 function appendMessage(role, text, extraClass) {
   const wrapper = document.createElement("div");
   wrapper.className = "msg " + role;
   const bubble = document.createElement("div");
   bubble.className = "bubble" + (extraClass ? " " + extraClass : "");
-  bubble.textContent = text;
+  // bot answers render as markdown (escaped inside renderMarkdown); user text stays literal
+  if (role === "bot") bubble.innerHTML = renderMarkdown(text);
+  else bubble.textContent = text;
   wrapper.appendChild(bubble);
   chatLog.appendChild(wrapper);
   wrapper.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -846,7 +957,7 @@ function pollAdd(requestId, prefix) {
         const data = await response.json();
         if (data.status === "done") {
           clearInterval(timer);
-          addStatus.textContent = "✓ " + prefix + (data.answer || data.statusDetail || "");
+          addStatus.textContent = "" + prefix + (data.answer || data.statusDetail || "");
           resolve("done");
         } else if (data.status === "error") {
           clearInterval(timer);
@@ -861,6 +972,95 @@ function pollAdd(requestId, prefix) {
 }
 addBtn.addEventListener("click", addArticle);
 addTitle.addEventListener("keydown", (e) => { if (e.key === "Enter") addArticle(); });
+
+// --- entity resolution: preview / merge duplicate entities in the current language ---
+function escHtml(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+let previewClusters = [];   // the groups from the last preview, so Apply knows which were deselected
+
+async function resolveDuplicates(dryRun, exclude) {
+  previewMergeBtn.disabled = true;
+  applyMergeBtn.disabled = true;
+  resolveReport.innerHTML = "";
+  resolveStatus.textContent = "🧹 " + (dryRun ? t().previewing : t().merging);
+  try {
+    const response = await fetch(baseUrl + "api/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lang: lang, dryRun: dryRun, exclude: exclude || [] })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || response.statusText);
+    const report = await pollResolve(data.requestId);
+    renderResolveReport(report, dryRun);
+  } catch (e) {
+    resolveStatus.textContent = "⚠️ " + e.message;
+  }
+  previewMergeBtn.disabled = false;
+}
+
+function pollResolve(requestId) {
+  return new Promise((resolve) => {
+    const timer = setInterval(async () => {
+      try {
+        const response = await fetch(baseUrl + "api/chat/" + requestId);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.status === "done") {
+          clearInterval(timer);
+          try { resolve(JSON.parse(data.answer || "{}")); }
+          catch (e) { resolve({ error: "could not parse report" }); }
+        } else if (data.status === "error") {
+          clearInterval(timer);
+          resolve({ error: data.statusDetail || t().genericError });
+        } else {
+          resolveStatus.textContent = "🧹 " + (data.statusDetail || "");
+        }
+      } catch (e) { /* transient - keep polling */ }
+    }, 1500);
+  });
+}
+
+function renderResolveReport(report, dryRun) {
+  if (report.error) { resolveStatus.textContent = "⚠️ " + report.error; return; }
+  const clusters = report.clusters || [];
+  const scrubbed = report.scrubbed || 0;
+  const typesFixed = report.typesFixed || 0;
+  if (clusters.length === 0 && scrubbed === 0 && typesFixed === 0) {
+    resolveStatus.textContent = "" + t().noDupes;
+    applyMergeBtn.disabled = true;
+    return;
+  }
+  const parts = [];
+  if (clusters.length) parts.push(dryRun ? t().previewDone(clusters.length) : t().mergeDone(report.merged));
+  if (scrubbed) parts.push(dryRun ? t().aliasesToClean(scrubbed) : t().aliasesCleaned(scrubbed));
+  if (typesFixed) parts.push(dryRun ? t().typesToFix(typesFixed) : t().typesDone(typesFixed));
+  resolveStatus.textContent = parts.join(" · ");
+  const body = (c) => "<b>" + escHtml(c.survivor) + "</b> ← " +
+    c.members.filter((m) => m !== c.survivor).map(escHtml).join(", ");
+  if (dryRun) {
+    // each proposed group gets a checkbox (checked); uncheck to exclude it from the merge
+    previewClusters = clusters;
+    resolveReport.innerHTML = clusters.map((c, i) =>
+      "<label class='mergeRow'><input type='checkbox' class='mergeChk' data-idx='" + i + "' checked> " +
+      "<span>" + body(c) + "</span></label>").join("");
+  } else {
+    resolveReport.innerHTML = clusters.map((c) => "<div class='mergeRow'>" + body(c) + "</div>").join("");
+  }
+  // enable Apply after a preview that found groups, aliases, or types to clean; clear after applying
+  applyMergeBtn.disabled = !(dryRun && (clusters.length > 0 || scrubbed > 0 || typesFixed > 0));
+  if (!dryRun) { refreshDocuments(); refreshStats(); }
+}
+
+previewMergeBtn.addEventListener("click", () => resolveDuplicates(true));
+applyMergeBtn.addEventListener("click", () => {
+  // exclude the groups the user unchecked in the preview
+  const exclude = [];
+  resolveReport.querySelectorAll(".mergeChk").forEach((chk) => {
+    if (!chk.checked) exclude.push(previewClusters[Number(chk.dataset.idx)].survivor);
+  });
+  if (exclude.length >= previewClusters.length) { resolveStatus.textContent = "" + t().noDupes; return; }
+  if (confirm(t().confirmMerge)) resolveDuplicates(false, exclude);
+});
 
 deleteBtn.addEventListener("click", async () => {
   const id = articleSelect.value;

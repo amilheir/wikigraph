@@ -13,14 +13,15 @@ Most RAG demos load a fixed set of documents and stop there. I wanted something 
     │  WSGI (/wikigraph, Flask hosted inside IRIS)
     │  POST /api/chat → just INSERTs a 'pending' GraphKB.ChatRequest row
     ▼
- ┌─ IRIS interoperability production (pyprod, Python) ────────────────────┐
- │  chatService (BS)  polls pending rows, claims them                     │
- │   └─ chatProcess (BP)  searching → learning → answering → done         │
- │        ├─ knowledgeOperation (BO)  graph-first, entity-scoped search   │
- │        ├─ wikipediaOperation (BO)  one page, redirects resolved        │
- │        ├─ ingestProcess (BP)       chunk → EMBEDDING column → entities │
- │        └─ llmOperation (BO)        distill · extract · answer          │
- └────────────────────────────────────────────────────────────────────────┘
+ ┌─ IRIS interoperability production (pyprod, Python) ─────────────────────┐
+ │  chatService (BS)  polls pending / ingest / resolve rows, claims them   │
+ │   ├─ chatProcess (BP)  searching → learning → answering → done          │
+ │   │    ├─ knowledgeOperation (BO)  graph-first, entity-scoped search    │
+ │   │    ├─ wikipediaOperation (BO)  one page, redirects resolved         │
+ │   │    ├─ ingestProcess (BP)       chunk → EMBEDDING column → LINK-KG   │
+ │   │    └─ llmOperation (BO)        distill · extract · answer           │
+ │   └─ resolutionOperation (BO)      dedup / merge duplicate entities     │
+ └─────────────────────────────────────────────────────────────────────────┘
     ▼
  ollama container — chat model + embedding model
 ```
@@ -33,7 +34,7 @@ A business operation is just a Python class with a `MessageMap`:
 
 ```python
 class llmOperation(BusinessOperation):
-    ollamaModel = IRISProperty(default="gemma4:e2b", settings="Ollama")
+    ollamaModel = IRISProperty(default="gemma4:e4b", settings="Ollama")
     temperature = IRISProperty(default="0.3", settings="Ollama Options")
 
     MessageMap = {"WikiGraph.generateAnswerMsg": "onGenerateAnswer"}
@@ -116,6 +117,16 @@ A naïve vector search conflates namesakes. WikiGraph runs **graph-first**: it r
 
 > 📸 *(screenshot: the "Knowledge graph" constellation view)*
 
+## Keeping the graph clean — with the same vector engine
+
+LLM extraction is inherently noisy: it spells one entity several ways and labels its type inconsistently. WikiGraph keeps the graph coherent in two complementary ways, both **entirely inside IRIS**.
+
+While reading, ingestion runs **coreference-aware extraction** (LINK-KG style): each chunk is given the canonical entities found earlier in the same article, so mentions like "Luke" or "him" resolve to a single canonical node ("Luke Skywalker"), with the shorter forms kept as *aliases* rather than spawning duplicates. Entity **identity is the canonical name**, not the model's unreliable type — so "R2-D2 (Droid)" and "R2-D2 (Droide)" are one node, not two.
+
+Anything that still slips through is handled by a separate **resolution pass** — and this is the part I like most as an IRIS demonstration: it needs no external entity-resolution tool, because it reuses the exact same vector machinery as retrieval. It **blocks** candidate pairs with an HNSW `VECTOR_COSINE` nearest-neighbour search, **matches** on name *plus* description agreement (so "Princess Leia" and "Leia Organa" merge into "Princess Leia Organa", while "Nikola Tesla" and "Tesla, Inc." stay apart), and **merges** each cluster into one canonical node — repointing its mentions and relationships. A dry-run previews every proposed merge before anything is written.
+
+> 📸 *(screenshot: the "Preview merges" dialog in Manage knowledge)*
+
 ## Try it
 
 ```bash
@@ -128,7 +139,7 @@ One command. The build incorporates the schema, the `EMBEDDING` config, and the 
 
 ---
 
-WikiGraph is a *small* application, but it draws on a remarkable amount of the IRIS data platform simultaneously: the `EMBEDDING` datatype, `VECTOR_COSINE` + HNSW, a Python interoperability production with full message tracing, WSGI hosting, and a graph model — all within a single instance and a single `docker compose up`. **That consolidation is the story.**
+WikiGraph is a *small* application, but it draws on a remarkable amount of the IRIS data platform simultaneously: the `EMBEDDING` datatype, `VECTOR_COSINE` + HNSW, a Python interoperability production with full message tracing, WSGI hosting, vector-powered entity resolution, and a graph model — all within a single instance and a single `docker compose up`. **That consolidation is the story.**
 
 
 *Scaffolded from [quickpyprod](https://github.com/isc-amilheir/quickpyprod) · GraphRAG schema inspired by [iris-vector-rag](https://github.com/intersystems-community/iris-vector-rag).*

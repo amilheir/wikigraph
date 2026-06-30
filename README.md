@@ -19,11 +19,15 @@ call) is a traceable message in the IRIS Management Portal. GraphRAG schema insp
 2. **Search** — IRIS resolves the question to known entities and does a **graph-first**, entity-scoped
    vector search over the chunks it already has.
 3. **Learn** — if the best score is below a threshold, it fetches the single best-matching Wikipedia
-   page, chunks it, embeds each chunk, and mines entities + relationships into the graph.
-4. **Answer** — a local LLM writes a grounded reply from the retrieved chunks and graph facts, in the
-   question's language.
+   page, chunks it, embeds each chunk, and mines entities + relationships into the graph. Extraction is
+   **coreference-aware (LINK-KG style)**: each chunk is given the canonical entities found earlier in
+   the same article, so mentions like "Luke" or "him" resolve to one canonical node ("Luke Skywalker"),
+   with shorter forms kept as **aliases** instead of spawning duplicate nodes.
+4. **Answer** — a local LLM writes a grounded reply (rendered as **markdown** in the UI) from the
+   retrieved chunks and graph facts, in the question's language.
 
-The second time the same topic comes up, step 3 is skipped — it's already remembered.
+The second time the same topic comes up, step 3 is skipped — it's already remembered. Duplicates that
+still slip through can be merged later by the **resolution pass** (see *Keeping the graph clean* below).
 
 ---
 
@@ -37,16 +41,17 @@ Two containers on one Compose network:
     │  POST /api/chat  →  just INSERTs a 'pending' GraphKB.ChatRequest row, returns its id
     ▼
  ┌─ IRIS interoperability production (pyprod) ────────────────────────────────────────────┐
- │  chatService (BS)        polls pending rows every 1s, claims them                      │
- │     └─► chatProcess (BP) orchestrator: drives status searching→learning→answering→done │
- │            ├─► knowledgeOperation (BO)   graph-first, entity-scoped vector search      │
- │            ├─► wikipediaOperation (BO)   best-match single page (no link following)    │
- │            ├─► ingestProcess (BP)        chunk → EMBEDDING column → entity extraction  │
- │            └─► llmOperation (BO)         topic distillation · extraction · answers     │
+ │  chatService (BS)        polls pending/ingest/resolve rows every 1s, claims them       │
+ │     ├─► chatProcess (BP) orchestrator: drives status searching→learning→answering→done │
+ │     │      ├─► knowledgeOperation (BO)  graph-first, entity-scoped vector search       │
+ │     │      ├─► wikipediaOperation (BO)  best-match single page (no link following)     │
+ │     │      ├─► ingestProcess (BP)       chunk → EMBEDDING column → LINK-KG extraction  │
+ │     │      └─► llmOperation (BO)        topic distillation · extraction · answers      │
+ │     └─► resolutionOperation (BO)        entity dedup / merge — preview + apply         │
  └────────────────────────────────────────────────────────────────────────────────────────┘
     │  EMBEDDING(text,'wikiembed')  and  chat completions
     ▼
- ollama container — chat model gemma4:e2b  +  embedding model (OpenAI-compatible /v1/embeddings)
+ ollama container — chat model gemma4:e4b  +  embedding model (OpenAI-compatible /v1/embeddings)
 ```
 
 The frontend polls `GET /api/chat/<id>` and renders a live status bubble; every hop above is also a
@@ -64,7 +69,7 @@ single loader compiles them in order:
 | `messages.py` | the interoperability messages (`JsonSerialize`) |
 | `services.py` | `chatPollAdapter` (inbound) + `chatService` |
 | `processes.py` | `chatProcess` + `ingestProcess` |
-| `operations.py` | `knowledgeOperation` + `wikipediaOperation` + `llmOperation` |
+| `operations.py` | `knowledgeOperation` + `wikipediaOperation` + `llmOperation` + `resolutionOperation` |
 | `wikiGraph.py` | the `Production` definition; imports the rest |
 | `loadProduction.sh` | compiles each module in order (Production last) — **the one command to load it all** |
 
@@ -74,10 +79,10 @@ single loader compiles them in order:
 |---|---|
 | `GraphKB.Document` | one row per ingested page; unique on `(pageId, lang)` |
 | `GraphKB.Chunk` | text chunks; `chunkVector EMBEDDING('wikiembed','embedText')` auto-vectorized, HNSW index. `embedText` is the chunk **prefixed with the article title** so senses separate in vector space; `chunkText` stays clean for display |
-| `GraphKB.Entity` | people/places/concepts; `descVector` EMBEDDING + HNSW; deduped on `(entityName, entityType, lang)`; `documentRef` links it to its article |
+| `GraphKB.Entity` | people/places/concepts; `descVector` EMBEDDING + HNSW; **identity is the canonical name** — deduped on `(entityName, lang)` (the LLM's `entityType` is a *normalized attribute*, not part of identity); `aliases` holds alternate surface forms (LINK-KG); `documentRef` links it to its article |
 | `GraphKB.Relationship` | typed edges `(sourceEntityRef, predicate, targetEntityRef)` |
 | `GraphKB.EntityMention` | which chunk an entity was mentioned in |
-| `GraphKB.ChatRequest` | the chat/queue state machine the frontend polls (`pending → searching → learning → answering → done`/`error`); an `ingest` status queues add-by-title requests |
+| `GraphKB.ChatRequest` | the chat/queue state machine the frontend polls (`pending → searching → learning → answering → done`/`error`); an `ingest` status queues add-by-title requests, a `resolve` status queues an entity-resolution sweep |
 
 ### Embeddings
 
@@ -95,8 +100,8 @@ live production settings.
 ## Retrieval: graph-first and disambiguating
 
 - **Graph-first, entity-scoped** (`knowledgeOperation`): the query is matched against entity
-  description vectors — **and** against any entity whose full name literally appears in the question
-  (`nameMatch`), so a multi-entity question ("Armstrong, Aldrin and Collins") keeps every named entity
+  description vectors — **and** against any entity whose canonical name (or one of its aliases) literally
+  appears in the question (`nameMatch`), so a multi-entity question ("Armstrong, Aldrin and Collins") keeps every named entity
   even when one embeds weakly. Only entities within a cosine **margin** (`scopeMargin`, 0.12) of the top
   match contribute their documents, and the chunk vector search is **scoped to those documents**, so a
   dominant sense ("Tesla" the company) cleanly beats the rival sense (Tesla the person). A **per-entity
@@ -114,7 +119,51 @@ live production settings.
 
 Retrieval, chunking and Wikipedia behaviour are all **live settings** in the Management Portal
 (`chatProcess`, `knowledgeOperation`, `ingestProcess`, `wikipediaOperation`) — see the tuning tables in
-`Overview2.html`.
+`docs/overview.html`.
+
+> **Add-by-title is verbatim.** The chat "learn" path lets the LLM distil a question into a search
+> title (`extractTopic`), but **add-by-title** (Manage knowledge) searches the exact title you typed —
+> the distiller can otherwise swap the subject (e.g. "han solo" → "Darth Vader"). The add field also
+> accepts a **comma-separated list** of titles, ingested in sequence.
+
+---
+
+## Keeping the graph clean — LINK-KG + the resolution pass
+
+LLM extraction is noisy, so WikiGraph fights entity fragmentation at two points:
+
+**At write time (LINK-KG, prevention).** `ingestProcess` keeps a per-article **registry** of the
+canonical entities found so far and feeds it back into each chunk's extraction, so the LLM reuses an
+established canonical name instead of inventing variants. The extraction prompt asks for a **full
+canonical name** plus **aliases** (alternate names *for the same entity only*), and a normalized **type**.
+Two guards back this up: an alias that is actually **another entity's name** is dropped, and `entityType`
+is canonicalized (`LOCATION`, `Location/Object` → `Location`). Entity **identity** is the canonical name,
+not the unreliable type — so `R2-D2 (Droid)` and `R2-D2 (Droide)` are one node, not two.
+
+**After the fact (resolution pass, cure).** `resolutionOperation` is a background sweep, per language,
+triggered from **Manage knowledge** ("Preview merges" / "Merge duplicates") or `POST /api/resolve`:
+
+1. **Blocking** — for each entity, its nearest neighbours by `descVector` cosine (HNSW), bounded by
+   `blockingTopK`/`blockingFloor`.
+2. **Matching** — *name-driven*: a name signal (exact / token-**containment** / fuzzy Jaro-Winkler),
+   gated by description-cosine agreement (`nameMatchFloor`) so same-named different things stay apart
+   (Nikola Tesla vs Tesla, Inc.). Pure-semantic merging is opt-in (`semanticOnly`) — in a single-domain
+   corpus, descriptions embed too similarly to merge on meaning alone.
+3. **Merging** — union-find the matches into clusters, pick the most complete name as the **survivor**
+   (`Leia` / `Princess Leia` / `Leia Organa` → **Princess Leia Organa**), repoint every `EntityMention`
+   and `Relationship` to it, fold the rest into aliases, then delete. Repoint-then-delete makes the pass
+   **idempotent**. The same sweep also **scrubs noisy aliases** and **normalizes types**.
+
+`dryRun` (the default) returns a JSON report of *proposed* merges without touching data — tune the
+thresholds in the Portal (group **Resolution**), confirm it merges the Leias but not the Teslas, then apply.
+
+## Languages
+
+EN and PT are kept as **separate knowledge graphs** sharing one schema, keyed by the `lang` column.
+Research (`wikipediaOperation` hits `{lang}.wikipedia.org`), retrieval, and graph-building are all
+language-scoped, and the read endpoints (`/api/graph`, `/api/stats`, `/api/documents`) accept `?lang=`
+so the constellation, stats and article list each show one language. The chat UI, the graph view and the
+Manage panel all have an EN/PT toggle.
 
 ---
 
@@ -169,11 +218,12 @@ docker compose exec iris iris session IRIS -U GRAPHRAG \
 | `GET /` | the chat single-page app |
 | `POST /api/chat` `{question, lang}` | insert a `pending` ChatRequest; returns `{requestId, status}` |
 | `GET /api/chat/<id>` | poll `{status, statusDetail, answer, …}` |
-| `GET /api/stats` | knowledge-graph counts (`documents/chunks/entities/relationships`) |
-| `GET /api/graph` | the whole graph (`nodes`, `links`, `documents`) for the constellation view |
-| `GET /api/documents` | learned articles with per-article chunk/entity counts |
-| `POST /api/documents` `{title, lang}` | add an article by Wikipedia title (queues an `ingest` request; poll `GET /api/chat/<id>` for progress) |
+| `GET /api/stats?lang=` | knowledge-graph counts (`documents/chunks/entities/relationships`), per language |
+| `GET /api/graph?lang=` | the graph (`nodes`, `links`, `documents`) for the constellation view, scoped to one language |
+| `GET /api/documents?lang=` | learned articles with per-article chunk/entity counts, scoped to one language |
+| `POST /api/documents` `{title, lang}` | add an article by exact Wikipedia title — no LLM distillation (queues an `ingest` request; poll `GET /api/chat/<id>`) |
 | `DELETE /api/documents/<id>` | delete an article and everything derived from it |
+| `POST /api/resolve` `{lang, dryRun}` | queue an entity-resolution sweep (dedup + alias scrub + type normalize); `dryRun:true` previews. Queues a `resolve` request; poll `GET /api/chat/<id>`, read the JSON report from `answer` |
 | `GET /docs/<file>` | static project docs (`overview.html`, `graph.html`, …) |
 
 ---
@@ -185,7 +235,7 @@ docker compose exec iris iris session IRIS -U GRAPHRAG \
 | `IRIS_IMAGE` | AI Hub community `2026.2.0AI.162.0` | base image for the IRIS container |
 | `IRIS_PORT` | `52773` | host port for the IRIS web server / chat UI |
 | `IRIS_SPORT` | `51972` | host port for the IRIS superserver (1972) |
-| `OLLAMA_MODEL` | `gemma4:e2b` | Ollama chat model (topic distillation, entity extraction, answers) |
+| `OLLAMA_MODEL` | `gemma4:e4b` | Ollama chat model (topic distillation, entity extraction, answers) |
 | `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint as seen from IRIS |
 | `OLLAMA_PORT` | `11435` | host port for Ollama (container is always 11434 internally) |
 | `EMBEDDING_MODEL` | `leoipulsar/harrier-0.6b` | Ollama embedding model behind the `EMBEDDING` datatype — **must be 1024-dim** (multilingual; `bge-m3` or `mxbai-embed-large` also work) |
@@ -203,8 +253,11 @@ at `leoipulsar/harrier-0.6b`. Ollama chat tuning (`maxTokens`, `temperature`, `t
 - All persistence is IRIS — no external vector store, queue or cache.
 - The Wikipedia scraper deliberately fetches a single page per topic and never follows *content* links
   (it does follow title redirects, e.g. Bruce Wayne → Batman).
-- gemma is a reasoning model: `llmOperation` sends `think:false` so the token budget isn't spent on a
-  hidden `thinking` block (which otherwise returns empty answers) — and so extraction yields clean JSON.
+- `llmOperation` uses Ollama **think mode for the final answer only** (`answerThink`): the model reasons
+  in a hidden `thinking` block and only the finished answer is returned, with a larger `answerMaxTokens`
+  budget so reasoning + the full answer both fit (`num_ctx` is shared by prompt + output, so the answer
+  context is also capped by `maxChunkChars`/`maxContextChars`). Topic distillation and entity extraction
+  run with `think:false` for direct output and clean JSON.
 - The frontend never calls the production directly; it only inserts a `pending` row that the polling
   `chatService` claims — avoiding the `<Ens>ErrJobRegistryNotClean` web-worker job-registry race.
 - camelCase is used across the Python/ObjectScript code (pyprod framework names like `OnRequest`,

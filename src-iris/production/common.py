@@ -8,6 +8,7 @@ directory, added to sys.path by each generated class's ScriptPath).
 import datetime
 import json
 import re
+import unicodedata
 
 from intersystems_pyprod import IRISLog, Status
 
@@ -26,6 +27,17 @@ def logErrorAndReturnStatus(errorMessage):
 def sqlExec(query, *args):
     import iris
     return iris.sql.exec(query, *args)
+
+
+def sqlExecSafe(query, *args):
+    """Run a DELETE/UPDATE that may affect zero rows without raising (iris.sql.exec raises SQLCODE 100
+    when nothing matched). Use for statements whose row count is not guaranteed (e.g. repointing a
+    loser entity that has no relationships during a merge)."""
+    import iris
+    try:
+        iris.sql.exec(query, *args)
+    except Exception:
+        pass
 
 
 def nowTimestamp():
@@ -120,6 +132,88 @@ def aliasListFromJson(aliasJson):
         return [a for a in parsed if isinstance(a, str)] if isinstance(parsed, list) else []
     except ValueError:
         return []
+
+
+def normalizeName(name):
+    """Canonical comparison key for an entity name: lowercase, strip accents, drop punctuation,
+    collapse whitespace. Keeps single spaces so callers can compare token sets for containment."""
+    s = (name or "").strip().lower()
+    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+    s = re.sub(r"[^a-z0-9 ]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def normalizeType(entityType):
+    """Canonicalize a free-text entity type to a uniform form: take the first segment (before any
+    '/', ',', ';' or '|'), trim, and Title-Case it - so 'LOCATION', 'location' and 'Location/Object'
+    all become 'Location'. Type is descriptive metadata only (not identity), so this just keeps the
+    'by type' grouping tidy. Empty -> 'Unknown'."""
+    segment = re.split(r"[\/,;|]", (entityType or "").strip())[0].strip()
+    if not segment:
+        return "Unknown"
+    return " ".join(word.capitalize() for word in segment.split())
+
+
+def jaroWinkler(a, b):
+    """Jaro-Winkler string similarity (0..1), pure Python so no extra dependency. Used by the
+    entity-resolution pass to catch spelling variants the normalized-exact key misses."""
+    if a == b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    la, lb = len(a), len(b)
+    window = max(la, lb) // 2 - 1
+    if window < 0:
+        window = 0
+    aMatched, bMatched = [False] * la, [False] * lb
+    matches = 0
+    for i in range(la):
+        lo, hi = max(0, i - window), min(i + window + 1, lb)
+        for j in range(lo, hi):
+            if not bMatched[j] and a[i] == b[j]:
+                aMatched[i] = bMatched[j] = True
+                matches += 1
+                break
+    if matches == 0:
+        return 0.0
+    transpositions, k = 0, 0
+    for i in range(la):
+        if aMatched[i]:
+            while not bMatched[k]:
+                k += 1
+            if a[i] != b[k]:
+                transpositions += 1
+            k += 1
+    transpositions //= 2
+    jaro = (matches / la + matches / lb + (matches - transpositions) / matches) / 3
+    prefix = 0
+    for i in range(min(4, la, lb)):
+        if a[i] == b[i]:
+            prefix += 1
+        else:
+            break
+    return jaro + prefix * 0.1 * (1 - jaro)
+
+
+def unionFind(pairs, items):
+    """Group items into connected components given a list of (a, b) "same" pairs. Returns only the
+    clusters with more than one member (the duplicate groups to merge)."""
+    parent = {i: i for i in items}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a, b in pairs:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+    clusters = {}
+    for i in items:
+        clusters.setdefault(find(i), []).append(i)
+    return [members for members in clusters.values() if len(members) > 1]
 
 
 def chunkArticleText(text, maxChars):

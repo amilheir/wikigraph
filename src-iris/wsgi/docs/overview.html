@@ -195,6 +195,7 @@ footer b{font-family:"Fraunces",serif;font-style:italic;font-size:1.4rem;color:v
       <a href="#flow">flow</a>
       <a href="#retrieval">retrieval</a>
       <a href="#graph">knowledge</a>
+      <a href="#clean">cleanup</a>
       <a href="#tuning">tuning</a>
     </nav>
   </div>
@@ -326,7 +327,7 @@ footer b{font-family:"Fraunces",serif;font-style:italic;font-size:1.4rem;color:v
 
           <rect x="484" y="414" width="200" height="46" rx="9" fill="#f6f8fb" stroke="#5d5a82" stroke-width="1"/>
           <text class="dlabel" x="584" y="434" text-anchor="middle" fill="#2f2a95" font-weight="500">Ollama container</text>
-          <text class="dlabel" x="584" y="449" text-anchor="middle" fill="#5d5a82">gemma4:e2b · harrier-0.6b</text>
+          <text class="dlabel" x="584" y="449" text-anchor="middle" fill="#5d5a82">gemma4:e4b · harrier-0.6b</text>
         </g>
         <line x1="115" y1="372" x2="130" y2="412" stroke="#00b2a9" stroke-width="1" marker-end="url(#ar)"/>
         <line x1="280" y1="372" x2="345" y2="412" stroke="#00b2a9" stroke-width="1" marker-end="url(#ar)"/>
@@ -386,10 +387,30 @@ footer b{font-family:"Fraunces",serif;font-style:italic;font-size:1.4rem;color:v
     <div class="cards">
       <div class="card"><div class="ct"><span class="dot" style="background:#5d5a82"></span>GraphKB.Document</div><p>One row per ingested page, unique by <span class="m">pageId</span> + language &mdash; an already-known topic skips learning and answers fast.</p></div>
       <div class="card"><div class="ct"><span class="dot" style="background:#00b2a9"></span>GraphKB.Chunk</div><p>Passages of an article. <span class="m">chunkVector</span> embeds <span class="m">embedText</span> &mdash; the chunk prefixed with its article title &mdash; over an HNSW index; <span class="m">chunkText</span> stays clean for display.</p></div>
-      <div class="card"><div class="ct"><span class="dot" style="background:#2f2a95"></span>GraphKB.Entity</div><p>People, places and concepts the LLM pulls from each chunk, each with a description vector. Deduped on name + type + language so senses stay distinct.</p></div>
+      <div class="card"><div class="ct"><span class="dot" style="background:#2f2a95"></span>GraphKB.Entity</div><p>People, places and concepts the LLM pulls from each chunk, each with a description vector. Identity is the <b>canonical name</b> (deduped on name + language; the LLM&rsquo;s type is a normalized attribute, not part of identity); alternate forms live in <span class="m">aliases</span> (LINK-KG).</p></div>
       <div class="card"><div class="ct"><span class="dot" style="background:#c8553d"></span>GraphKB.Relationship</div><p>Typed edges <span class="m">source → predicate → target</span>. After the entity match, the search expands one hop across these for richer context.</p></div>
       <div class="card"><div class="ct"><span class="dot" style="background:#00756e"></span>GraphKB.EntityMention</div><p>Links an entity to every chunk that mentions it &mdash; the bridge the per-entity search follows so a named entity contributes evidence from whatever document describes it, even across articles.</p></div>
       <div class="card"><div class="ct"><span class="dot" style="background:#9b98c2"></span>GraphKB.ChatRequest</div><p>The chat state machine itself &mdash; question, language, status, detail and answer &mdash; inserted by the web app and polled by the UI.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="clean">
+  <div class="wrap reveal">
+    <p class="kicker"><span class="no">06</span> keeping the graph clean</p>
+    <h2>One entity, not five.</h2>
+    <p class="section-lede">LLM extraction is noisy &mdash; it spells the same character five ways and mislabels its type. WikiGraph fights fragmentation twice: <b>prevention</b> while reading, and a <b>cure</b> that runs after.</p>
+    <div class="two">
+      <div class="panel win">
+        <span class="lbl">prevention · LINK-KG</span>
+        <h4>Coreference-aware extraction</h4>
+        <p>Each chunk is given the canonical entities found earlier in the same article, so the LLM reuses an established name instead of inventing variants. It returns a <b>full canonical name</b> + <span class="m">aliases</span> + a normalized type. Identity is the name, not the unreliable type &mdash; so <i>R2-D2 (Droid)</i> and <i>R2-D2 (Droide)</i> are one node. Guards drop an alias that&rsquo;s really another entity, and tidy <span class="m">LOCATION</span>/<span class="m">Location/Object</span> &rarr; <span class="m">Location</span>.</p>
+      </div>
+      <div class="panel lose" style="border-left-color:var(--teal)">
+        <span class="lbl">cure · resolutionOperation</span>
+        <h4>The resolution pass</h4>
+        <p>A background sweep, per language, from <b>Manage knowledge</b> (Preview / Merge) or <code>POST /api/resolve</code>. <b>Block</b> by description cosine (HNSW), <b>match</b> name-first (exact / token-containment / fuzzy, gated by description agreement so the two Teslas stay apart), then <b>merge</b> each cluster into the most complete name &mdash; <i>Leia · Princess Leia · Leia Organa</i> &rarr; <b>Princess Leia Organa</b> &mdash; repointing mentions &amp; relationships. It also scrubs noisy aliases and normalizes types. <span class="m">dryRun</span> previews every proposed merge before anything is written.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -402,7 +423,7 @@ footer b{font-family:"Fraunces",serif;font-style:italic;font-size:1.4rem;color:v
       <span class="chip"><b>Flask</b> over WSGI in IRIS</span>
       <span class="chip"><b>EMBEDDING</b> datatype · VECTOR_COSINE · HNSW</span>
       <span class="chip"><b>%Embedding.OpenAI</b> &rarr; Ollama</span>
-      <span class="chip"><b>gemma4:e2b</b> chat + <b>harrier-0.6b</b> embeddings</span>
+      <span class="chip"><b>gemma4:e4b</b> chat + <b>harrier-0.6b</b> embeddings</span>
       <span class="chip"><b>Wikipedia</b> REST API</span>
     </div>
     <div class="run">
@@ -459,7 +480,20 @@ footer b{font-family:"Fraunces",serif;font-style:italic;font-size:1.4rem;color:v
         <tr><td class="prop">userAgent</td><td class="what">User-Agent sent to the Wikipedia API</td><td class="def">WikiGraph</td><td class="ideal">Fine as-is; a descriptive UA with a contact is politer for heavy use.</td></tr>
         <tr><td class="prop">maxExtractChars</td><td class="what">Max characters fetched from the chosen page</td><td class="def">120000</td><td class="ideal">Keep &ge; chunkChars &times; maxEmbedChunks so the fetch isn&rsquo;t the limiter; rarely needs changing.</td></tr>
         <tr><td class="prop">searchCandidates</td><td class="what">Candidate pages fetched &amp; <b>reranked to pick the right one</b></td><td class="def">5</td><td class="ideal">3&ndash;6. More &rarr; better disambiguation (astronaut vs. &ldquo;RV Neil Armstrong&rdquo; ship), slightly slower.</td></tr>
-        <tr><td class="prop">extractTopic</td><td class="what">1 = LLM <b>distils the question into a clean search title</b> before searching</td><td class="def">1 (on)</td><td class="ideal">Keep 1 for better candidates; 0 = search the raw question (faster, worse titles).</td></tr>
+        <tr><td class="prop">extractTopic</td><td class="what">1 = LLM <b>distils the question into a clean search title</b> before searching (chat &ldquo;learn&rdquo; path only)</td><td class="def">1 (on)</td><td class="ideal">Keep 1 for better candidates from questions. <b>Add-by-title always searches verbatim</b> &mdash; the distiller can swap the subject (&ldquo;han solo&rdquo; &rarr; &ldquo;Darth Vader&rdquo;).</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3 class="tune-h">resolutionOperation <span class="g">· Resolution</span></h3>
+    <div class="tune"><table>
+      <thead><tr><th>property</th><th>what it does</th><th>default</th><th>ideal</th></tr></thead>
+      <tbody>
+        <tr><td class="prop">dryRun</td><td class="what">Preview proposed merges only &mdash; <b>no writes</b> (the /api/resolve call overrides this per request)</td><td class="def">1 (on)</td><td class="ideal">Keep 1; &ldquo;Preview merges&rdquo; uses it, &ldquo;Merge duplicates&rdquo; applies.</td></tr>
+        <tr><td class="prop">nameMatchFloor</td><td class="what">A name match merges only if the two <b>descriptions agree</b> at least this much (cosine) &mdash; keeps Nikola Tesla and Tesla, Inc. apart</td><td class="def">0.70</td><td class="ideal">0.6&ndash;0.8. Higher = stricter; too low merges same-named different things.</td></tr>
+        <tr><td class="prop">blockingFloor</td><td class="what">Min description cosine for a pair to even be a merge candidate</td><td class="def">0.70</td><td class="ideal">Keep near nameMatchFloor &mdash; only pairs this similar are compared.</td></tr>
+        <tr><td class="prop">nameFuzzyThreshold</td><td class="what">Jaro-Winkler above which two names count as a <b>fuzzy</b> match (typos/transliterations)</td><td class="def">0.97</td><td class="ideal">0.9&ndash;0.97. Lower catches more typos but risks false merges.</td></tr>
+        <tr><td class="prop">semanticOnly</td><td class="what">Also merge on <b>description cosine alone</b>, with no name signal</td><td class="def">0 (off)</td><td class="ideal">Leave 0 &mdash; same-domain entities embed too similarly, so meaning-only over-merges.</td></tr>
+        <tr><td class="prop">useAliases</td><td class="what">Also match on the <span class="m">aliases</span> field, not just the canonical name</td><td class="def">0 (off)</td><td class="ideal">Turn on once aliases are clean; off if extraction aliases are noisy.</td></tr>
       </tbody>
     </table></div>
 
@@ -475,6 +509,8 @@ footer b{font-family:"Fraunces",serif;font-style:italic;font-size:1.4rem;color:v
         <tr><td class="prop">keepAlive</td><td class="what">How long Ollama keeps the model <b>resident</b> between calls</td><td class="def">30m</td><td class="ideal">30&ndash;60m (or -1 = always) to avoid reload latency; shorten only on a shared GPU.</td></tr>
         <tr><td class="prop">requestTimeout</td><td class="what">HTTP read timeout for the Ollama call (seconds)</td><td class="def">600</td><td class="ideal">300&ndash;600. Must exceed worst-case generation; keep high on CPU.</td></tr>
         <tr><td class="prop">extractMaxTokens</td><td class="what">Token budget for <b>entity-extraction JSON</b></td><td class="def">1200</td><td class="ideal">1000&ndash;1500. Too low truncates the JSON and loses that chunk&rsquo;s entities.</td></tr>
+        <tr><td class="prop">answerThink</td><td class="what">Let the model <b>think before the final answer</b> (Ollama think mode); the reasoning is discarded and only the answer is returned</td><td class="def">1 (on)</td><td class="ideal">On for better answers; off for speed. Extraction/topic always run think-off.</td></tr>
+        <tr><td class="prop">answerMaxTokens</td><td class="what">Token budget for the <b>final answer</b> &mdash; must cover reasoning + the full answer when answerThink=1</td><td class="def">1024</td><td class="ideal">&ge; maxTokens. Too low truncates the answer; keep answerMaxTokens/4 + context well under numCtx.</td></tr>
       </tbody>
     </table></div>
     <p class="tune-note">Also on <span class="m">llmOperation</span> (group <b>Ollama</b>): <span class="m">ollamaUrl</span> and <span class="m">ollamaModel</span> &mdash; pointing <span class="m">ollamaModel</span> at a larger model (if pulled in the Ollama container) is the single biggest answer-quality lever, at the cost of speed and VRAM.</p>

@@ -11,7 +11,7 @@ import json
 from intersystems_pyprod import IRISParameter, IRISProperty, InboundAdapter, BusinessService, Status
 
 from common import logErrorAndReturnStatus
-from messages import chatRequestMsg
+from messages import chatRequestMsg, resolveEntitiesMsg
 
 iris_package_name = "WikiGraph"
 
@@ -23,14 +23,19 @@ class chatPollAdapter(InboundAdapter):
         try:
             import iris
             pending = []
-            # 'pending' = a chat question; 'ingest' = add a Wikipedia article by title
+            # 'pending' = a chat question; 'ingest' = add a Wikipedia article by title;
+            # 'resolve' = dedup the knowledge graph (question holds the dryRun flag "1"/"0")
             for row in iris.sql.exec(
                     "SELECT TOP 5 %ID, question, lang, status FROM GraphKB.ChatRequest "
-                    "WHERE status IN ('pending', 'ingest') ORDER BY %ID"):
+                    "WHERE status IN ('pending', 'ingest', 'resolve') ORDER BY %ID"):
                 pending.append((int(row[0]), row[1], row[2], row[3]))
             for requestId, question, lang, rowStatus in pending:
-                mode = "ingest" if rowStatus == "ingest" else "chat"
-                detail = "Adding the article" if mode == "ingest" else "Searching the knowledge base"
+                if rowStatus == "ingest":
+                    mode, detail = "ingest", "Adding the article"
+                elif rowStatus == "resolve":
+                    mode, detail = "resolve", "Resolving duplicate entities"
+                else:
+                    mode, detail = "chat", "Searching the knowledge base"
                 # claim the row so the next poll won't pick it up again
                 iris.sql.exec(
                     "UPDATE GraphKB.ChatRequest SET status = 'searching', statusDetail = ?, "
@@ -48,14 +53,30 @@ class chatService(BusinessService):
         default="chatProcess",
         description="Business process that orchestrates the chat pipeline",
         settings="Target:selector?context={Ens.ContextSearch/ProductionItems?targets=1&productionName=@productionId}")
+    resolveTarget = IRISProperty(
+        default="resolutionOperation",
+        description="Business operation that dedups the knowledge graph",
+        settings="Target:selector?context={Ens.ContextSearch/ProductionItems?targets=1&productionName=@productionId}")
 
     def OnProcessInput(self, input):
         status = Status.OK()
         try:
             payload = json.loads(input) if isinstance(input, str) else input
-            message = chatRequestMsg(int(payload["requestId"]), payload["question"],
-                                     payload.get("lang", "en"), payload.get("mode", "chat"))
-            status = self.SendRequestAsync(self.targetConfigName, message)
+            requestId = int(payload["requestId"])
+            lang = payload.get("lang", "en")
+            if payload.get("mode") == "resolve":
+                # 'question' carries the resolve params as JSON: {dryRun, exclude}
+                try:
+                    params = json.loads(payload.get("question") or "{}")
+                except ValueError:
+                    params = {}
+                dryRun = 1 if params.get("dryRun", True) else 0
+                excludeJson = json.dumps(params.get("exclude") or [])
+                status = self.SendRequestAsync(self.resolveTarget,
+                                               resolveEntitiesMsg(requestId, lang, 0, dryRun, excludeJson))
+            else:
+                message = chatRequestMsg(requestId, payload["question"], lang, payload.get("mode", "chat"))
+                status = self.SendRequestAsync(self.targetConfigName, message)
         except Exception as e:
             status, _ = logErrorAndReturnStatus("ERROR in chatService OnProcessInput: " + str(e))
         return status

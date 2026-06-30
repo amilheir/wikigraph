@@ -58,7 +58,7 @@ class wikiGraphProduction(Production):
                         "wikipediaTarget": "wikipediaOperation",
                         "ingestTarget": "ingestProcess",
                         "llmTarget": "llmOperation",
-                        "similarityThreshold": os.environ.get("SIMILARITY_THRESHOLD", "0.6")
+                        "similarityThreshold": os.environ.get("SIMILARITY_THRESHOLD", "0.55")
                     }),
         ProcessItem("ingestProcess", "WikiGraph.ingestProcess", pool_size=0,
                     host_settings={"llmTarget": "llmOperation"})
@@ -70,6 +70,7 @@ class wikiGraphProduction(Production):
         OperationItem("llmOperation", "WikiGraph.llmOperation", pool_size=1,
                       host_settings={
                           "ollamaUrl": os.environ.get("OLLAMA_URL", "http://ollama:11434"),
-                          "ollamaModel": os.environ.get("OLLAMA_MODEL", "gemma4:e2b")
-                      })
+                          "ollamaModel": os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
+                      }),
+        OperationItem("resolutionOperation", "WikiGraph.resolutionOperation", pool_size=1)
     ]

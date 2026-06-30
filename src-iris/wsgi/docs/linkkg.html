@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WikiGraph — the LINK-KG learning loop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..700,0..100&family=Newsreader:ital,opsz,wght@0,6..72,300..500;1,6..72,300..500&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#08081a;
+  --void-2:#0d0d26;
+  --panel:#11112e;
+  --line:rgba(129,140,248,.14);
+  --line-2:rgba(129,140,248,.28);
+  --star:#ececff;
+  --mist:#9d9bd0;
+  --mist-2:#6e6ca0;
+  --teal:#28e6d4;
+  --teal-deep:#0b8f86;
+  --indigo:#7c74ff;
+  --coral:#ff7a59;
+  --gold:#f3c64b;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+  --serif:"Newsreader",Georgia,serif;
+  --display:"Fraunces",Georgia,serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--serif);
+  background:var(--void);
+  color:var(--star);
+  font-size:18px;line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+::selection{background:var(--teal);color:#03110f}
+
+/* atmosphere: deep radial wash + faint star grid + grain */
+body::before{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(900px 600px at 78% -8%, rgba(40,230,212,.10), transparent 60%),
+    radial-gradient(800px 700px at -6% 108%, rgba(124,116,255,.13), transparent 58%),
+    radial-gradient(1200px 900px at 50% 40%, rgba(20,20,60,.5), transparent 70%);
+}
+body::after{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:radial-gradient(circle at 1px 1px, rgba(140,150,255,.10) 1px, transparent 0);
+  background-size:38px 38px;
+  mask-image:radial-gradient(ellipse at 50% 35%, #000 30%, transparent 85%);
+}
+.wrap{position:relative;z-index:2;max-width:1120px;margin:0 auto;padding:0 2rem}
+
+/* ---------- nav ---------- */
+.bar{position:sticky;top:0;z-index:40;backdrop-filter:blur(10px);
+  background:linear-gradient(rgba(8,8,26,.86),rgba(8,8,26,.5));border-bottom:1px solid var(--line)}
+.bar .wrap{display:flex;align-items:center;justify-content:space-between;height:58px}
+.logo{display:flex;align-items:center;gap:.6rem;font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--teal)}
+.logo svg{width:20px;height:20px}
+.barnav{display:flex;gap:1.5rem;font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase}
+.barnav a{color:var(--mist-2);text-decoration:none;transition:color .25s}
+.barnav a:hover{color:var(--teal)}
+@media(max-width:760px){.barnav{display:none}}
+
+/* ---------- reveal ---------- */
+.rv{opacity:0;transform:translateY(26px);transition:opacity .9s cubic-bezier(.2,.7,.2,1),transform .9s cubic-bezier(.2,.7,.2,1)}
+.rv.in{opacity:1;transform:none}
+
+/* ---------- hero ---------- */
+.hero{position:relative;padding:7rem 0 4rem;min-height:88vh;display:flex;align-items:center}
+.hero .wrap{width:100%}
+.eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.3em;text-transform:uppercase;color:var(--teal);
+  display:flex;align-items:center;gap:.8rem}
+.eyebrow::before{content:"";width:46px;height:1px;background:linear-gradient(90deg,var(--teal),transparent)}
+h1{font-family:var(--display);font-weight:340;font-size:clamp(2.8rem,7.5vw,6.4rem);line-height:.98;letter-spacing:-.025em;
+  margin:1.3rem 0 0;max-width:18ch;font-variation-settings:"SOFT" 40,"opsz" 144}
+h1 em{font-style:italic;color:var(--teal);font-weight:360}
+h1 .frag{color:var(--coral);font-style:italic}
+.lede{font-size:clamp(1.05rem,2vw,1.4rem);color:var(--mist);max-width:46ch;margin-top:1.6rem;line-height:1.55}
+.lede b{color:var(--star);font-weight:500;font-style:italic;font-family:var(--display)}
+.cta{margin-top:2.2rem;display:flex;gap:1rem;flex-wrap:wrap}
+.pill{font-family:var(--mono);font-size:.72rem;letter-spacing:.08em;color:var(--star);text-decoration:none;
+  border:1px solid var(--line-2);border-radius:999px;padding:.62rem 1.15rem;transition:.25s;background:rgba(124,116,255,.06)}
+.pill:hover{border-color:var(--teal);color:var(--teal);transform:translateY(-2px)}
+.pill.ghost{background:transparent;color:var(--mist)}
+
+/* hero constellation */
+.constell{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:.85}
+.constell svg{width:100%;height:100%}
+.edge{stroke:var(--teal);stroke-opacity:.22;stroke-width:1;fill:none;stroke-dasharray:5 7;animation:flow 14s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-160}}
+.cn{fill:var(--void-2);stroke:var(--indigo);stroke-width:1.3}
+.cn.hot{fill:rgba(40,230,212,.18);stroke:var(--teal);filter:drop-shadow(0 0 7px rgba(40,230,212,.7))}
+.tw{animation:tw 5s ease-in-out infinite}
+@keyframes tw{0%,100%{opacity:.5;r:4}50%{opacity:1;r:6}}
+.drift{animation:drift 18s ease-in-out infinite}
+@keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(6px,-9px)}}
+
+/* ---------- section frame ---------- */
+section{position:relative;padding:5rem 0;border-top:1px solid var(--line)}
+.kick{font-family:var(--mono);font-size:.7rem;letter-spacing:.24em;text-transform:uppercase;color:var(--teal);display:flex;gap:.7rem;align-items:center;margin-bottom:1rem}
+.kick .no{color:var(--mist-2)}
+h2{font-family:var(--display);font-weight:380;font-size:clamp(1.9rem,4.6vw,3.2rem);line-height:1.05;letter-spacing:-.02em;max-width:20ch;font-variation-settings:"SOFT" 30}
+h2 em{font-style:italic;color:var(--teal)}
+.sub{color:var(--mist);max-width:60ch;margin-top:1rem;font-size:1.06rem}
+.mono{font-family:var(--mono);font-size:.84em;color:var(--teal);background:rgba(40,230,212,.09);padding:.06em .42em;border-radius:5px;white-space:nowrap}
+
+/* ---------- pipeline ribbon ---------- */
+.pipe{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-top:2.4rem;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:rgba(17,17,46,.5)}
+@media(max-width:720px){.pipe{grid-template-columns:repeat(2,1fr)}}
+.stage{padding:1.7rem 1.4rem;position:relative;border-right:1px solid var(--line)}
+.stage:last-child{border-right:0}
+.stage .si{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;color:var(--mist-2);text-transform:uppercase}
+.stage h3{font-family:var(--display);font-weight:420;font-size:1.5rem;margin:.45rem 0 .35rem;font-style:italic}
+.stage p{font-size:.92rem;color:var(--mist);line-height:1.5}
+.stage.learn{background:linear-gradient(160deg,rgba(40,230,212,.12),rgba(124,116,255,.06));}
+.stage.learn h3{color:var(--teal)}
+.stage.learn::after{content:"LINK-KG lives here";position:absolute;right:1rem;bottom:.9rem;font-family:var(--mono);font-size:.6rem;letter-spacing:.12em;color:var(--gold);border:1px solid rgba(243,198,75,.4);border-radius:999px;padding:.18rem .5rem}
+.stage .num{font-family:var(--display);font-style:italic;font-size:2.4rem;color:rgba(124,116,255,.35);line-height:1;position:absolute;top:1rem;right:1.1rem}
+.stage.learn .num{color:rgba(40,230,212,.4)}
+
+/* ---------- the LINK-KG comparison ---------- */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:1.4rem;margin-top:2.6rem}
+@media(max-width:820px){.compare{grid-template-columns:1fr}}
+.lane{border:1px solid var(--line);border-radius:18px;padding:1.6rem 1.5rem 1.9rem;background:var(--panel);position:relative;overflow:hidden}
+.lane.bad{border-color:rgba(255,122,89,.3)}
+.lane.good{border-color:rgba(40,230,212,.32);box-shadow:0 0 0 1px rgba(40,230,212,.06),0 30px 60px -40px rgba(40,230,212,.4)}
+.lane .tag{font-family:var(--mono);font-size:.64rem;letter-spacing:.16em;text-transform:uppercase;display:inline-block;padding:.28rem .6rem;border-radius:999px;margin-bottom:1rem}
+.lane.bad .tag{color:var(--coral);background:rgba(255,122,89,.12);border:1px solid rgba(255,122,89,.3)}
+.lane.good .tag{color:var(--teal);background:rgba(40,230,212,.12);border:1px solid rgba(40,230,212,.3)}
+.lane h4{font-family:var(--display);font-weight:420;font-size:1.35rem;font-style:italic;margin-bottom:.3rem}
+.lane .desc{color:var(--mist);font-size:.92rem;min-height:2.6em}
+
+/* shared input chips */
+.chips{display:flex;flex-wrap:wrap;gap:.45rem;margin:1.1rem 0 1.2rem}
+.chip{font-family:var(--mono);font-size:.7rem;color:var(--mist);border:1px dashed var(--line-2);border-radius:7px;padding:.32rem .55rem;background:rgba(124,116,255,.05)}
+.chip b{color:var(--star);font-weight:500}
+
+/* the little engine */
+.engine{display:flex;align-items:center;gap:.7rem;margin:.4rem 0 1.3rem}
+.box{font-family:var(--mono);font-size:.68rem;letter-spacing:.04em;color:var(--star);border:1px solid var(--line-2);border-radius:9px;padding:.55rem .7rem;background:rgba(13,13,38,.8);text-align:center;line-height:1.35}
+.box small{display:block;color:var(--mist-2);font-size:.62rem;margin-top:.15rem}
+.arrowd{flex:1;height:1px;background:linear-gradient(90deg,var(--line-2),var(--teal));position:relative}
+.arrowd::after{content:"";position:absolute;right:-1px;top:-3px;border-left:6px solid var(--teal);border-top:3.5px solid transparent;border-bottom:3.5px solid transparent}
+.lane.bad .arrowd{background:linear-gradient(90deg,var(--line-2),var(--coral))}
+.lane.bad .arrowd::after{border-left-color:var(--coral)}
+
+/* registry chip with pulse + loop */
+.reg{position:relative;border:1px solid rgba(243,198,75,.45);background:rgba(243,198,75,.08);color:var(--gold);
+  font-family:var(--mono);font-size:.66rem;border-radius:9px;padding:.5rem .65rem;text-align:center;line-height:1.3}
+.reg::before{content:"";position:absolute;inset:-1px;border-radius:9px;border:1px solid var(--gold);opacity:.5;animation:regpulse 2.6s ease-out infinite}
+@keyframes regpulse{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.18);opacity:0}}
+.loop{font-family:var(--mono);font-size:.62rem;color:var(--gold);text-align:center;margin:.2rem 0 .9rem;letter-spacing:.1em}
+.loop span{display:inline-block;animation:spin 3.2s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* result nodes */
+.result{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;min-height:74px;margin-top:.4rem}
+.node{font-family:var(--mono);font-size:.72rem;border-radius:10px;padding:.5rem .75rem;border:1px solid;white-space:nowrap}
+.lane.bad .node{color:var(--coral);border-color:rgba(255,122,89,.45);background:rgba(255,122,89,.08);
+  opacity:0;animation:pop .6s ease forwards}
+.lane.bad .node:nth-child(1){animation-delay:.2s}
+.lane.bad .node:nth-child(2){animation-delay:1.0s}
+.lane.bad .node:nth-child(3){animation-delay:1.8s}
+@keyframes pop{0%{opacity:0;transform:translateY(8px) scale(.9)}60%{transform:translateY(0) scale(1.04)}100%{opacity:1;transform:none}}
+.stamp{font-family:var(--mono);font-size:.62rem;color:var(--coral);border:1px solid rgba(255,122,89,.4);border-radius:6px;padding:.2rem .45rem;margin-left:.2rem;letter-spacing:.08em}
+
+/* the single canonical node */
+.canon{display:inline-flex;flex-direction:column;gap:.5rem;border:1px solid var(--teal);border-radius:14px;
+  padding:.85rem 1rem;background:rgba(40,230,212,.08);box-shadow:0 0 24px -6px rgba(40,230,212,.5);position:relative}
+.canon .name{font-family:var(--display);font-style:italic;font-size:1.25rem;color:var(--star)}
+.canon .aka{display:flex;flex-wrap:wrap;gap:.35rem}
+.canon .alias{font-family:var(--mono);font-size:.62rem;color:var(--teal);border:1px solid rgba(40,230,212,.35);border-radius:999px;padding:.16rem .5rem;
+  opacity:0;animation:aliasin .5s ease forwards}
+.canon .alias:nth-child(1){animation-delay:.6s}
+.canon .alias:nth-child(2){animation-delay:1.3s}
+.canon .alias:nth-child(3){animation-delay:2.0s}
+@keyframes aliasin{from{opacity:0;transform:translateX(-6px) scale(.85)}to{opacity:1;transform:none}}
+.canon .halo{position:absolute;inset:-1px;border-radius:14px;border:1px solid var(--teal);opacity:0;animation:halo 3s ease-out infinite}
+@keyframes halo{0%{opacity:.6;transform:scale(1)}100%{opacity:0;transform:scale(1.07)}}
+
+/* ---------- the loop diagram ---------- */
+.loopdiag{margin-top:2.6rem;border:1px solid var(--line);border-radius:20px;background:linear-gradient(160deg,rgba(17,17,46,.7),rgba(8,8,26,.4));padding:2rem 1.4rem 1rem}
+.loopdiag svg{width:100%;height:auto;display:block;overflow:visible}
+.ld-flow{stroke:var(--teal);stroke-width:1.6;fill:none;stroke-dasharray:7 8;animation:flow 5s linear infinite;filter:drop-shadow(0 0 4px rgba(40,230,212,.6))}
+.ld-box{fill:rgba(13,13,38,.92);stroke:var(--line-2);stroke-width:1}
+.ld-box.reg{stroke:var(--gold);fill:rgba(243,198,75,.07)}
+.ld-t{font-family:var(--mono);font-size:12px;fill:var(--star)}
+.ld-s{font-family:var(--mono);font-size:10px;fill:var(--mist-2)}
+.ld-g{font-family:var(--mono);font-size:10px;fill:var(--gold)}
+.spark{fill:var(--teal);filter:drop-shadow(0 0 6px var(--teal))}
+
+/* ---------- resolution coda ---------- */
+.coda{display:grid;grid-template-columns:1.1fr 1fr;gap:1.4rem;margin-top:2.4rem;align-items:center}
+@media(max-width:760px){.coda{grid-template-columns:1fr}}
+.coda .card{border:1px solid var(--line);border-radius:16px;padding:1.5rem 1.5rem;background:var(--panel)}
+.coda .card h4{font-family:var(--display);font-style:italic;font-weight:420;font-size:1.4rem;margin-bottom:.5rem;color:var(--indigo)}
+.coda .card p{color:var(--mist);font-size:.98rem}
+.merge{display:flex;align-items:center;gap:.6rem;font-family:var(--mono);font-size:.72rem;flex-wrap:wrap;margin-top:1rem}
+.merge .from{color:var(--mist);border:1px solid var(--line-2);border-radius:7px;padding:.3rem .5rem}
+.merge .to{color:var(--teal);border:1px solid var(--teal);border-radius:7px;padding:.3rem .55rem;background:rgba(40,230,212,.08)}
+.merge .ar{color:var(--gold)}
+
+footer{border-top:1px solid var(--line);padding:2.6rem 0 3.4rem;margin-top:3rem}
+footer .wrap{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:1rem;
+  font-family:var(--mono);font-size:.7rem;letter-spacing:.08em;color:var(--mist-2)}
+footer b{font-family:var(--display);font-style:italic;font-size:1.3rem;color:var(--star);font-weight:400}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="wrap">
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><g fill="none" stroke="#28e6d4" stroke-width="1.4"><path d="M5 6 L18 4 M5 6 L9 17 M18 4 L9 17 M18 4 L20 14 M9 17 L20 14"/></g><g fill="#7c74ff"><circle cx="5" cy="6" r="2.2"/><circle cx="18" cy="4" r="2.2"/><circle cx="9" cy="17" r="2.2"/><circle cx="20" cy="14" r="2.2"/></g></svg>
+      WikiGraph
+    </div>
+    <nav class="barnav">
+      <a href="#process">process</a>
+      <a href="#linkkg">link-kg</a>
+      <a href="#loop">the loop</a>
+      <a href="#resolve">resolution</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero">
+  <div class="constell">
+    <svg viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <g>
+        <line class="edge" x1="180" y1="140" x2="430" y2="90"/>
+        <line class="edge" x1="430" y1="90" x2="720" y2="180"/>
+        <line class="edge" x1="720" y1="180" x2="980" y2="120"/>
+        <line class="edge" x1="180" y1="140" x2="300" y2="430"/>
+        <line class="edge" x1="430" y1="90" x2="520" y2="380"/>
+        <line class="edge" x1="300" y1="430" x2="520" y2="380"/>
+        <line class="edge" x1="520" y1="380" x2="760" y2="470"/>
+        <line class="edge" x1="720" y1="180" x2="760" y2="470"/>
+        <line class="edge" x1="980" y1="120" x2="1010" y2="430"/>
+        <line class="edge" x1="760" y1="470" x2="1010" y2="430"/>
+        <line class="edge" x1="300" y1="430" x2="420" y2="660"/>
+        <line class="edge" x1="760" y1="470" x2="640" y2="690"/>
+        <line class="edge" x1="420" y1="660" x2="640" y2="690"/>
+      </g>
+      <g>
+        <g class="drift"><circle class="cn tw" cx="180" cy="140" r="5"/></g>
+        <g class="drift" style="animation-delay:-4s"><circle class="cn hot tw" cx="430" cy="90" r="6"/></g>
+        <circle class="cn tw" cx="720" cy="180" r="5" style="animation-delay:-2s"/>
+        <g class="drift" style="animation-delay:-8s"><circle class="cn hot" cx="980" cy="120" r="6"/></g>
+        <circle class="cn tw" cx="300" cy="430" r="5" style="animation-delay:-1s"/>
+        <g class="drift" style="animation-delay:-6s"><circle class="cn hot tw" cx="520" cy="380" r="6"/></g>
+        <circle class="cn tw" cx="760" cy="470" r="5" style="animation-delay:-3s"/>
+        <circle class="cn tw" cx="1010" cy="430" r="5" style="animation-delay:-5s"/>
+        <g class="drift" style="animation-delay:-10s"><circle class="cn hot tw" cx="420" cy="660" r="6"/></g>
+        <circle class="cn tw" cx="640" cy="690" r="5" style="animation-delay:-7s"/>
+      </g>
+    </svg>
+  </div>
+  <div class="wrap rv in">
+    <p class="eyebrow">InterSystems IRIS · GraphRAG · pyprod</p>
+    <h1>Reads a page. <em>Links</em> every mention. <br>Remembers it as <span class="frag">one</span>.</h1>
+    <p class="lede">WikiGraph learns from Wikipedia on demand — and keeps its graph coherent with <b>LINK-KG</b>: each chunk is extracted with a running memory of who's already been named, so &ldquo;Luke,&rdquo; &ldquo;he,&rdquo; and &ldquo;the young Jedi&rdquo; collapse into a single canonical node instead of three.</p>
+    <div class="cta">
+      <a class="pill" href="#linkkg">See the strategy ↓</a>
+      <a class="pill ghost" href="#loop">The registry loop</a>
+    </div>
+  </div>
+</header>
+
+<section id="process">
+  <div class="wrap rv">
+    <p class="kick"><span class="no">01</span> the process</p>
+    <h2>A loop that closes on itself.</h2>
+    <p class="sub">A question it can't answer well becomes a trigger to read, structure, and remember — so the second time, it's instant. Knowledge graph, vectors, chat state and orchestration all live inside a single IRIS instance.</p>
+    <div class="pipe">
+      <div class="stage"><span class="num">1</span><span class="si">ask</span><h3>Ask</h3><p>A question arrives in English or Portuguese.</p></div>
+      <div class="stage"><span class="num">2</span><span class="si">search</span><h3>Search</h3><p>Graph-first, entity-scoped vector search over what it already knows.</p></div>
+      <div class="stage learn"><span class="num">3</span><span class="si">learn</span><h3>Learn</h3><p>Below threshold → fetch one page, chunk, embed, and mine the entity graph.</p></div>
+      <div class="stage"><span class="num">4</span><span class="si">answer</span><h3>Answer</h3><p>A local LLM replies, grounded, in the question's language.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="linkkg">
+  <div class="wrap rv">
+    <p class="kick"><span class="no">02</span> the link-kg strategy</p>
+    <h2>One entity, <em>not five.</em></h2>
+    <p class="sub">An LLM spells the same character a dozen ways across an article. The naïve approach extracts each chunk blind and fragments them. <b style="color:var(--star);font-style:italic;font-family:var(--display)">LINK-KG</b> feeds a running registry back into every extraction, so mentions resolve to one canonical node — aliases and all.</p>
+    <div class="compare">
+      <div class="lane bad">
+        <span class="tag">Stateless · no memory</span>
+        <h4>Each chunk on its own</h4>
+        <p class="desc">Extraction has no idea what it already named, so one person becomes three nodes.</p>
+        <div class="chips"><span class="chip">"…<b>Luke</b> trained…"</span><span class="chip">"…<b>he</b> repaired…"</span><span class="chip">"…the <b>young Jedi</b>…"</span></div>
+        <div class="engine"><span class="box">extract<small>chunk</small></span><span class="arrowd"></span></div>
+        <div class="result">
+          <span class="node">Luke</span>
+          <span class="node">He (?)</span>
+          <span class="node">young Jedi</span>
+          <span class="stamp">×3 fragmented</span>
+        </div>
+      </div>
+      <div class="lane good">
+        <span class="tag">LINK-KG · registry-fed</span>
+        <h4>One canonical node</h4>
+        <p class="desc">The registry travels with the extraction; every mention snaps onto the same entity.</p>
+        <div class="chips"><span class="chip">"…<b>Luke</b> trained…"</span><span class="chip">"…<b>he</b> repaired…"</span><span class="chip">"…the <b>young Jedi</b>…"</span></div>
+        <div class="engine"><span class="box">extract&nbsp;+&nbsp;reuse<small>reads registry</small></span><span class="arrowd"></span><span class="reg">registry<br>Luke&nbsp;Skywalker</span></div>
+        <div class="loop"><span>↻</span> &nbsp;registry persists to the next chunk</div>
+        <div class="result">
+          <span class="canon">
+            <span class="halo"></span>
+            <span class="name">Luke Skywalker</span>
+            <span class="aka">
+              <span class="alias">aka Luke</span>
+              <span class="alias">aka he</span>
+              <span class="alias">aka young Jedi</span>
+            </span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="loop">
+  <div class="wrap rv">
+    <p class="kick"><span class="no">03</span> the registry loop</p>
+    <h2>Memory that rides <em>with</em> the extraction.</h2>
+    <p class="sub">Inside <span class="mono">ingestProcess</span>, a per-article registry is built across the chunk loop: it's injected into each extraction prompt (<span class="mono">KNOWN_ENTITIES_PROMPT</span>), and <span class="mono">storeGraph</span> writes new canonical names back into it for the next chunk.</p>
+    <div class="loopdiag">
+      <svg viewBox="0 0 920 250" role="img" aria-label="The LINK-KG registry loop: extract, store, repeat, feeding the registry">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M2 1L8 5L2 9" fill="none" stroke="#28e6d4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </marker>
+        </defs>
+
+        <!-- registry station (top center) -->
+        <rect class="ld-box reg" x="360" y="14" width="200" height="48" rx="10"/>
+        <text class="ld-g" x="460" y="34" text-anchor="middle">registry · linked entities</text>
+        <text class="ld-g" x="460" y="50" text-anchor="middle" style="fill:#f3c64b">{ Luke Skywalker, R2-D2 }</text>
+
+        <!-- three stations -->
+        <rect class="ld-box" x="60" y="130" width="220" height="62" rx="11"/>
+        <text class="ld-t" x="170" y="156" text-anchor="middle">① onExtractEntities</text>
+        <text class="ld-s" x="170" y="174" text-anchor="middle">inject registry into the prompt</text>
+
+        <rect class="ld-box" x="350" y="130" width="220" height="62" rx="11"/>
+        <text class="ld-t" x="460" y="156" text-anchor="middle">② LLM → graph</text>
+        <text class="ld-s" x="460" y="174" text-anchor="middle">canonical name + aliases</text>
+
+        <rect class="ld-box" x="640" y="130" width="220" height="62" rx="11"/>
+        <text class="ld-t" x="750" y="156" text-anchor="middle">③ storeGraph</text>
+        <text class="ld-s" x="750" y="174" text-anchor="middle">upsert · update registry</text>
+
+        <!-- flow arrows -->
+        <path class="ld-flow" d="M280 161 L346 161" marker-end="url(#ah)"/>
+        <path class="ld-flow" d="M570 161 L636 161" marker-end="url(#ah)"/>
+        <!-- registry feeds extraction (down-left) -->
+        <path class="ld-flow" d="M360 44 C250 60 170 80 170 126" marker-end="url(#ah)"/>
+        <!-- store updates registry (up-right) -->
+        <path class="ld-flow" d="M750 128 C750 80 660 58 562 44" marker-end="url(#ah)"/>
+        <!-- next chunk loop back -->
+        <path class="ld-flow" d="M750 194 C750 232 170 232 170 196" marker-end="url(#ah)"/>
+        <text class="ld-g" x="460" y="246" text-anchor="middle">↻ next chunk — the registry persists</text>
+
+        <!-- travelling spark -->
+        <circle class="spark" r="4">
+          <animateMotion dur="6s" repeatCount="indefinite" path="M170 161 L460 161 L750 161 C750 232 170 232 170 161"/>
+        </circle>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<section id="resolve">
+  <div class="wrap rv">
+    <p class="kick"><span class="no">04</span> the backstop</p>
+    <h2>And a sweep to <em>reconcile the rest.</em></h2>
+    <p class="sub">LINK-KG prevents fragmentation <i>within</i> an article. Across articles, a separate <b style="color:var(--star);font-style:italic;font-family:var(--display)">resolution pass</b> reuses the same vectors and aliases to merge what's left — name-driven, gated by description similarity, so namesakes stay apart.</p>
+    <div class="coda">
+      <div class="card">
+        <h4>Prevention + cure</h4>
+        <p>The registry keeps each page clean as it's read; the resolution pass periodically blocks candidates by description-vector neighbours, matches on name, and merges each cluster into its fullest name — folding the rest into aliases.</p>
+        <div class="merge">
+          <span class="from">Leia</span><span class="from">Princess Leia</span><span class="from">Leia Organa</span>
+          <span class="ar">→</span><span class="to">Princess Leia Organa</span>
+        </div>
+      </div>
+      <div class="card">
+        <h4>…but never over-merge</h4>
+        <p>A shared name only merges when the descriptions agree — so two genuinely different things stay distinct.</p>
+        <div class="merge">
+          <span class="from">Nikola Tesla</span><span class="ar" style="color:var(--coral)">⊘</span><span class="from">Tesla, Inc.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>WikiGraph — a self-growing GraphRAG chatbot on InterSystems IRIS</span>
+    <b>read · link · remember</b>
+  </div>
+</footer>
+
+<script>
+const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}})},{threshold:.14});
+document.querySelectorAll('.rv').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>

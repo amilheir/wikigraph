@@ -8,6 +8,7 @@ and race across workers with <Ens>ErrJobRegistryNotClean).
 """
 
 import datetime
+import json
 import os
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -46,7 +47,11 @@ def langFilter():
 
 @app.route("/")
 def index():
-    return send_from_directory(staticDir, "index.html")
+    # Serve index.html as a plain byte body rather than via send_from_directory: the IRIS WSGI
+    # gateway truncates the file-wrapper response for the root path at ~16KB, which left the page
+    # blank below the header once index.html grew past that size. A plain Response is drained fully.
+    with open(os.path.join(staticDir, "index.html"), "rb") as fh:
+        return app.response_class(fh.read(), mimetype="text/html")
 
 
 @app.route("/docs/<path:filename>")
@@ -115,6 +120,33 @@ def deleteDocument(documentId):
     sqlExecSafe("DELETE FROM GraphKB.Entity WHERE documentRef = ?", documentId)
     sqlExecSafe("DELETE FROM GraphKB.Document WHERE %ID = ?", documentId)
     return jsonify({"deleted": documentId, "title": title})
+
+
+@app.route("/api/resolve", methods=["POST"])
+def resolveDuplicates():
+    """Queue an entity-resolution sweep for one language. Inserts a 'resolve' ChatRequest row that
+    the chatService poller routes to resolutionOperation; the frontend polls GET /api/chat/<id> and
+    reads the JSON report from the 'answer' field. dryRun (default true) previews without merging."""
+    payload = request.get_json(silent=True) or {}
+    lang = (payload.get("lang") or os.environ.get("DEFAULT_LANG", "en")).lower()
+    if lang not in SUPPORTED_LANGS:
+        lang = "en"
+    dry = payload.get("dryRun") is not False   # preview unless explicitly told to apply
+    exclude = payload.get("exclude") or []     # survivor names the user deselected (skip on apply)
+    # the resolve params travel in the question field of the ChatRequest row (the poller reads it)
+    params = json.dumps({"dryRun": dry, "exclude": exclude})[:1900]
+
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row = iris.cls("GraphKB.ChatRequest")._New()
+    row.question = params
+    row.lang = lang
+    row.status = "resolve"
+    row.statusDetail = "Resolving duplicate entities"
+    row.createdAt = now
+    row.updatedAt = now
+    if str(row._Save()) != "1":
+        return jsonify({"error": "could not queue the resolution"}), 500
+    return jsonify({"requestId": int(row._Id()), "status": "resolve", "dryRun": dry})
 
 
 @app.route("/api/chat", methods=["POST"])

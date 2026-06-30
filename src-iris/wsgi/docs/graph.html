@@ -19,7 +19,7 @@
   --gold: #00a9c7;
   --rule: rgba(17, 43, 77, .25);
   --card: #ffffff;
-  --shadow: 0 2px 0 rgba(17,43,77,.06), 0 18px 40px -22px rgba(17,43,77,.45);
+  --shadow: 3px 3px 0 rgba(17,43,77,.3);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -51,14 +51,14 @@ h1 .graph { color: var(--oxblood); font-style: italic; }
 .stat b { color: var(--oxblood); font-style: normal; }
 
 /* pill controls — like index.html langToggle */
-.seg { display: inline-flex; border: 1.5px solid var(--ink); border-radius: 999px; overflow: hidden; background: var(--card); box-shadow: 2px 2px 0 rgba(17,43,77,.2); }
+.seg { display: inline-flex; border: 1.5px solid var(--ink); border-radius: 999px; overflow: hidden; background: var(--card); box-shadow: var(--shadow) }
 .seg button, .pill {
   font-family: "Fraunces", serif; font-size: .78rem; font-weight: 700; letter-spacing: .06em;
   padding: .36rem .85rem; border: 0; background: transparent; color: var(--ink); cursor: pointer; transition: all .18s ease;
 }
 .seg button.on { background: var(--oxblood); color: var(--card); }
 .seg button:not(.on):hover { color: var(--ink); }
-.pill { border: 1.5px solid var(--ink); border-radius: 999px; background: var(--card); box-shadow: 2px 2px 0 rgba(17,43,77,.2); }
+.pill { border: 1.5px solid var(--ink); border-radius: 999px; background: var(--card); box-shadow: var(--shadow); }
 .pill:hover { color: var(--ink); }
 .pill.on { background: var(--oxblood); color: var(--card); }
 .pill:active, .seg button:active { transform: translateY(1px); }

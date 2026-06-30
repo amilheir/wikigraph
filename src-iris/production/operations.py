@@ -7,8 +7,11 @@ import requests
 
 from intersystems_pyprod import IRISProperty, BusinessOperation, IRISLog, Status
 
-from common import EMBEDDING_CONFIG, statusIsOk, logErrorAndReturnStatus, sqlExec, aliasListFromJson
-from messages import (knowledgeSearchResponse, wikiFetchResponse, extractTopicMsg, llmResponseMsg)
+from common import (EMBEDDING_CONFIG, statusIsOk, logErrorAndReturnStatus, sqlExec, sqlExecSafe,
+                    aliasListFromJson, normalizeName, normalizeType, jaroWinkler, unionFind,
+                    updateChatStatus)
+from messages import (knowledgeSearchResponse, wikiFetchResponse, extractTopicMsg, llmResponseMsg,
+                      resolveResponse)
 
 iris_package_name = "WikiGraph"
 
@@ -337,8 +340,11 @@ class wikipediaOperation(BusinessOperation):
             lang = request.lang if request.lang in ("en", "pt") else "en"
             apiUrl = "https://" + lang + ".wikipedia.org/w/api.php"
 
-            # 0. distil the question into a clean search title via the LLM
-            queryTitle = self.searchTopic(request.topic, lang)
+            # 0. distil the question into a clean search title via the LLM - but only when the caller
+            #    asks for it (chat questions). Add-by-title passes distill=0 so the exact title is used
+            #    verbatim, avoiding the LLM swapping the subject (e.g. 'han solo' -> 'Darth Vader').
+            distill = int(getattr(request, "distill", 1) or 0)
+            queryTitle = self.searchTopic(request.topic, lang) if distill else request.topic
 
             # 1. resolve the title FOLLOWING REDIRECTS (redirects=1). If it lands on a real article
             #    - e.g. "Bruce Wayne" -> "Batman", "Anakin Skywalker" -> "Darth Vader" - store that
@@ -428,8 +434,13 @@ EXTRACTION_PROMPT = (
     "You are an information extraction engine building a knowledge graph. "
     "Extract the named entities and the relationships between them from the user's text. "
     "For each entity, use its FULL, CANONICAL name as \"name\" (e.g. 'Luke Skywalker' not 'Luke', "
-    "'Tesla, Inc.' not 'Tesla'). Resolve pronouns and partial mentions to that canonical entity, and "
-    "put any shorter or alternate forms that appear in the text into \"aliases\". "
+    "'Tesla, Inc.' not 'Tesla'). Resolve pronouns and partial mentions to that canonical entity. "
+    "\"aliases\" = OTHER NAMES FOR THIS SAME ENTITY ONLY (a short form, full name, nickname, title, "
+    "or abbreviation). NEVER put another entity in aliases: not actors who portray a character, not "
+    "relatives, not related places or organizations, not anything that is its own entity. "
+    "Example - for 'Luke Skywalker': aliases [\"Luke\"]; NOT [\"Mark Hamill\", \"Leia\", \"Tatooine\"]. "
+    "\"type\" must be a SINGLE general category in Title Case (e.g. Person, Organization, Location, "
+    "Object, Event, Work, Concept) - never ALL CAPS and never a slash-separated combination. "
     "Respond ONLY with JSON in exactly this shape: "
     '{"entities": [{"name": "...", "type": "...", "aliases": ["..."], "description": "..."}], '
     '"relationships": [{"source": "...", "target": "...", "predicate": "...", "description": "..."}]} '
@@ -447,8 +458,11 @@ ANSWER_PROMPT = (
     "You are a helpful assistant. Answer the user's question using ONLY the knowledge "
     "context JSON provided (text chunks, entities and relationship triples from a knowledge graph). "
     "If the context is insufficient, say so honestly. Answer in the language of the question ({lang}). "
-    "Be concise. Answer the questions as the context "
-    "were knowledge that you already know.\n\nKnowledge context:\n{context}")
+    "Be concise. Answer the user's question, but answer DIRECTLY and naturally, as if you already know the facts. "
+    "Do NOT mention, cite, or allude to the reference material, the context, the passages, the data, "
+    "the documents, the knowledge graph, or where the information comes from. Never use phrases like "
+    "'the context states', 'the provided information', 'according to the text', 'based on the knowledge "
+    "context. \n\nKnowledge context:\n{context}")
 
 TOPIC_PROMPT = (
     "Turn the user's question into the single best Wikipedia article title to look up. "
@@ -465,7 +479,7 @@ class llmOperation(BusinessOperation):
         description="Ollama base URL (set from OLLAMA_URL; editable here in the Portal)",
         settings="Ollama")
     ollamaModel = IRISProperty(
-        default="gemma4:e2b",
+        default="gemma4:e4b",
         description="Ollama model tag (set from OLLAMA_MODEL; editable here in the Portal)",
         settings="Ollama")
     # --- response tuning, all editable live in the Management Portal under "Ollama Options" ---
@@ -509,6 +523,25 @@ class llmOperation(BusinessOperation):
         default=1024, datatype=int,
         description="Token budget for the final answer. Must be larger than maxTokens when answerThink=1 so the reasoning AND the complete answer both fit (otherwise the answer is truncated/empty).",
         settings="Ollama Options")
+    # --- prompt overrides, editable live under "Prompts". LEAVE BLANK to use the built-in default
+    #     (the *_PROMPT constants below). The defaults can't be emitted as IRISProperty defaults
+    #     because their JSON braces break the generated class, so blank means "use the code default".
+    topicPrompt = IRISProperty(
+        default="",
+        description="Override the topic-distillation system prompt (turns a question into a Wikipedia title). Blank = built-in default.",
+        settings="Prompts")
+    extractionPrompt = IRISProperty(
+        default="",
+        description="Override the entity/relationship extraction system prompt (must still ask for the {name, type, aliases, description}/relationships JSON shape). Blank = built-in default.",
+        settings="Prompts")
+    knownEntitiesPrompt = IRISProperty(
+        default="",
+        description="Override the LINK-KG 'entities already found' suffix appended during extraction. Must contain the {known} placeholder. Blank = built-in default.",
+        settings="Prompts")
+    answerPrompt = IRISProperty(
+        default="",
+        description="Override the answer system prompt. Must contain the {lang} and {context} placeholders. Blank = built-in default.",
+        settings="Prompts")
 
     MessageMap = {
         "WikiGraph.extractTopicMsg": "onExtractTopic",
@@ -557,7 +590,7 @@ class llmOperation(BusinessOperation):
 
     def onExtractTopic(self, request):
         try:
-            content = self.chat(TOPIC_PROMPT, request.question, maxTokens=40)
+            content = self.chat(self.topicPrompt or TOPIC_PROMPT, request.question, maxTokens=40)
             topic = (content or "").strip().strip('"').strip("'")
             topic = topic.splitlines()[0][:200] if topic else ""
             return Status.OK(), llmResponseMsg(topic)
@@ -567,10 +600,14 @@ class llmOperation(BusinessOperation):
 
     def onExtractEntities(self, request):
         try:
-            systemPrompt = EXTRACTION_PROMPT
+            systemPrompt = self.extractionPrompt or EXTRACTION_PROMPT
             known = (getattr(request, "knownEntities", "") or "").strip()
             if known and known not in ("[]", "{}"):
-                systemPrompt += KNOWN_ENTITIES_PROMPT.format(known=known)
+                knownTpl = self.knownEntitiesPrompt or KNOWN_ENTITIES_PROMPT
+                try:
+                    systemPrompt += knownTpl.format(known=known)
+                except (KeyError, IndexError, ValueError):
+                    systemPrompt += KNOWN_ENTITIES_PROMPT.format(known=known)
             content = self.chat(systemPrompt, request.chunkText, jsonMode=True,
                                 maxTokens=int(self.extractMaxTokens))
             return Status.OK(), llmResponseMsg(content)
@@ -580,7 +617,12 @@ class llmOperation(BusinessOperation):
 
     def onGenerateAnswer(self, request):
         try:
-            systemPrompt = ANSWER_PROMPT.format(lang=request.lang, context=request.contextJson)
+            template = self.answerPrompt or ANSWER_PROMPT
+            try:
+                systemPrompt = template.format(lang=request.lang, context=request.contextJson)
+            except (KeyError, IndexError, ValueError):
+                # a custom prompt with a bad placeholder must not break answering
+                systemPrompt = ANSWER_PROMPT.format(lang=request.lang, context=request.contextJson)
             think = bool(int(self.answerThink))
             content = self.chat(systemPrompt, request.question, think=think,
                                 maxTokens=int(self.answerMaxTokens))
@@ -593,3 +635,264 @@ class llmOperation(BusinessOperation):
         except Exception as e:
             status, _ = logErrorAndReturnStatus("ERROR in llmOperation onGenerateAnswer: " + str(e))
             return status, llmResponseMsg("")
+
+
+# --------------------------------------------------------------------------
+# Business Operation - entity resolution (dedup the knowledge graph)
+# --------------------------------------------------------------------------
+
+class resolutionOperation(BusinessOperation):
+    """Post-hoc entity resolution: find duplicate entity nodes (same real-world thing under different
+    names/types) and merge each cluster into one canonical node. Runs as a background sweep per
+    language. dryRun=1 reports the proposed merges without touching data."""
+
+    blockingTopK = IRISProperty(
+        default=15, datatype=int,
+        description="Candidate neighbours considered per entity (HNSW vector search). Bounds the pairwise comparison.",
+        settings="Resolution")
+    blockingFloor = IRISProperty(
+        default="0.7",
+        description="Minimum description cosine for a pair to even be considered a merge candidate.",
+        settings="Resolution")
+    nameMatchFloor = IRISProperty(
+        default="0.7",
+        description="A name-based signal (exact/containment/fuzzy) only merges if the two descriptions agree at least this much (cosine). This is the guardrail that keeps same-named different things apart (Nikola Tesla vs Tesla, Inc.).",
+        settings="Resolution")
+    nameFuzzyThreshold = IRISProperty(
+        default="0.97",
+        description="Jaro-Winkler similarity above which two names count as a fuzzy match (typos/transliterations).",
+        settings="Resolution")
+    semanticThreshold = IRISProperty(
+        default="0.97",
+        description="Description cosine above which two entities merge on meaning alone (only used when semanticOnly=1).",
+        settings="Resolution")
+    semanticOnly = IRISProperty(
+        default=0, datatype=int,
+        description="0 (default) = a NAME signal is required to merge; description cosine is only the guard. 1 = also merge on description cosine alone (>= semanticThreshold). Leave OFF unless descriptions are rich/discriminative - same-domain entities (e.g. all Star Wars characters) embed very similarly and pure-semantic merging over-merges them.",
+        settings="Resolution")
+    maxClusterSize = IRISProperty(
+        default=12, datatype=int,
+        description="Safety cap: clusters larger than this are skipped (likely an over-broad threshold).",
+        settings="Resolution")
+    useAliases = IRISProperty(
+        default=0, datatype=int,
+        description="0 (default) = match on the canonical entityName only. 1 = also match on the aliases field. Leave OFF if aliases are LLM-extracted and noisy (co-occurring entities mislabelled as aliases), which would cause false merges.",
+        settings="Resolution")
+    dryRun = IRISProperty(
+        default=1, datatype=int,
+        description="1 = report proposed merges only (no writes). Set 0 to actually merge. The /api/resolve call overrides this per request.",
+        settings="Resolution")
+
+    MessageMap = {
+        "WikiGraph.resolveEntitiesMsg": "onResolve"
+    }
+
+    def loadEntities(self, lang):
+        """All same-language entities with an embedding, keyed by id, with their normalized name forms.
+        Aliases are only used as match forms when useAliases=1 (off by default - LLM aliases are noisy)."""
+        useAliases = int(self.useAliases)
+        entById = {}
+        for row in sqlExec(
+                "SELECT %ID, entityName, entityType, description, aliases FROM GraphKB.Entity "
+                "WHERE lang = ? AND descVector IS NOT NULL", lang):
+            forms = [normalizeName(row[1])]
+            if useAliases:
+                forms += [normalizeName(a) for a in aliasListFromJson(row[4])]
+            entById[int(row[0])] = {
+                "id": int(row[0]), "name": row[1] or "", "type": row[2] or "",
+                "forms": [f for f in forms if f]}
+        return entById
+
+    def candidatePairs(self, lang, entById):
+        """Blocking: for each entity, its top-K nearest by description cosine (HNSW). Returns a dict
+        {(loId, hiId): cosine} so each pair is compared once."""
+        floor, topK = float(self.blockingFloor), int(self.blockingTopK)
+        pairs = {}
+        for entityId in entById:
+            for row in sqlExec(
+                    "SELECT TOP " + str(topK) + " b.%ID, VECTOR_COSINE(a.descVector, b.descVector) AS sim "
+                    "FROM GraphKB.Entity a, GraphKB.Entity b "
+                    "WHERE a.%ID = ? AND b.lang = ? AND b.%ID <> a.%ID AND b.descVector IS NOT NULL "
+                    "ORDER BY sim DESC", entityId, lang):
+                other, sim = int(row[0]), (float(row[1]) if row[1] is not None else 0.0)
+                if sim < floor:
+                    continue
+                key = (min(entityId, other), max(entityId, other))
+                if key not in pairs or sim > pairs[key]:
+                    pairs[key] = sim
+        return pairs
+
+    def isMatch(self, a, b, sim):
+        """Decide whether two entities are the same. A NAME signal (exact shared form /
+        token-containment / fuzzy) is required, gated by description agreement (sim >= nameMatchFloor)
+        - that floor is what keeps the two Teslas apart. Pure-semantic merging is opt-in (semanticOnly)
+        because same-domain entities embed very similarly, so cosine alone over-merges."""
+        if sim < float(self.nameMatchFloor):
+            return False, ""
+        formsA, formsB = a["forms"], b["forms"]
+        if set(formsA) & set(formsB):
+            return True, "name-exact, sim %.2f" % sim
+        for fa in formsA:
+            ta = set(fa.split())
+            for fb in formsB:
+                tb = set(fb.split())
+                if ta and tb and (ta < tb or tb < ta):
+                    return True, "name-contains, sim %.2f" % sim
+        best = 0.0
+        for fa in formsA:
+            for fb in formsB:
+                score = jaroWinkler(fa, fb)
+                if score > best:
+                    best = score
+        if best >= float(self.nameFuzzyThreshold):
+            return True, "name-fuzzy %.2f, sim %.2f" % (best, sim)
+        if int(self.semanticOnly) and sim >= float(self.semanticThreshold):
+            return True, "semantic %.2f" % sim
+        return False, ""
+
+    def mentionCount(self, entityId):
+        for row in sqlExec("SELECT COUNT(*) FROM GraphKB.EntityMention WHERE entityRef = ?", entityId):
+            return int(row[0])
+        return 0
+
+    def pickSurvivor(self, memberIds, entById):
+        """Keep the most complete record: the name with the most tokens (so 'Princess Leia Organa'
+        beats 'Leia'), tie-broken by mention count, then lowest id."""
+        def score(entityId):
+            return (len(normalizeName(entById[entityId]["name"]).split()),
+                    self.mentionCount(entityId), -entityId)
+        return max(memberIds, key=score)
+
+    def mergeCluster(self, survivorId, loserIds, entById):
+        """Repoint every reference to the survivor, fold the losers' names into its aliases, then
+        delete the losers. Order (repoint -> delete) means there are never dangling refs even if
+        interrupted, so the pass is safely re-runnable."""
+        # sqlExecSafe: a loser may have no mentions / no out- or in-relationships, so these UPDATEs
+        # can affect zero rows (iris.sql.exec raises SQLCODE 100 on a 0-row UPDATE/DELETE).
+        for loser in loserIds:
+            sqlExecSafe("UPDATE GraphKB.EntityMention SET entityRef = ? WHERE entityRef = ?", survivorId, loser)
+            sqlExecSafe("UPDATE GraphKB.Relationship SET sourceEntityRef = ? WHERE sourceEntityRef = ?", survivorId, loser)
+            sqlExecSafe("UPDATE GraphKB.Relationship SET targetEntityRef = ? WHERE targetEntityRef = ?", survivorId, loser)
+        # fold all members' name forms into the survivor's aliases (minus its own canonical name)
+        allForms = set()
+        for entityId in [survivorId] + loserIds:
+            allForms.update(entById[entityId]["forms"])
+        allForms.discard(normalizeName(entById[survivorId]["name"]))
+        sqlExecSafe("UPDATE GraphKB.Entity SET aliases = ? WHERE %ID = ?",
+                    json.dumps(sorted(allForms), ensure_ascii=False), survivorId)
+        for loser in loserIds:
+            sqlExecSafe("DELETE FROM GraphKB.Entity WHERE %ID = ?", loser)
+        # one mention per chunk on the survivor
+        seen, dupMentions = set(), []
+        for row in sqlExec("SELECT %ID, chunkRef FROM GraphKB.EntityMention WHERE entityRef = ? ORDER BY %ID", survivorId):
+            if row[1] in seen:
+                dupMentions.append(int(row[0]))
+            else:
+                seen.add(row[1])
+        for mentionId in dupMentions:
+            sqlExecSafe("DELETE FROM GraphKB.EntityMention WHERE %ID = ?", mentionId)
+
+    def cleanRelationships(self):
+        """After merges, drop self-loops and duplicate (source, predicate, target) triples."""
+        sqlExecSafe("DELETE FROM GraphKB.Relationship WHERE sourceEntityRef = targetEntityRef")
+        seen, dup = set(), []
+        for row in sqlExec("SELECT %ID, sourceEntityRef, targetEntityRef, predicate FROM GraphKB.Relationship ORDER BY %ID"):
+            triple = (row[1], row[2], row[3])
+            if triple in seen:
+                dup.append(int(row[0]))
+            else:
+                seen.add(triple)
+        for relId in dup:
+            sqlExecSafe("DELETE FROM GraphKB.Relationship WHERE %ID = ?", relId)
+
+    def scrubAliases(self, lang, dry):
+        """Remove aliases that are actually the canonical name of a DIFFERENT entity (the noisy
+        LLM-extracted aliases). Returns how many aliases were removed; only writes when not dry."""
+        rows = list(sqlExec("SELECT %ID, entityName, aliases FROM GraphKB.Entity WHERE lang = ?", lang))
+        nameSet = set(normalizeName(r[1]) for r in rows if r[1])
+        nameSet.discard("")
+        removed = 0
+        for row in rows:
+            current = aliasListFromJson(row[2])
+            if not current:
+                continue
+            selfNorm = normalizeName(row[1])
+            kept = [a for a in current
+                    if not (normalizeName(a) in nameSet and normalizeName(a) != selfNorm)]
+            if len(kept) != len(current):
+                removed += len(current) - len(kept)
+                if not dry:
+                    sqlExecSafe("UPDATE GraphKB.Entity SET aliases = ? WHERE %ID = ?",
+                                json.dumps(kept, ensure_ascii=False), int(row[0]))
+        return removed
+
+    def normalizeTypes(self, lang, dry):
+        """Canonicalize free-text entity types ('LOCATION', 'Location/Object' -> 'Location') so the
+        'by type' grouping is uniform. Returns how many were changed; only writes when not dry."""
+        changed = 0
+        for row in list(sqlExec("SELECT %ID, entityType FROM GraphKB.Entity WHERE lang = ?", lang)):
+            current = row[1] or ""
+            norm = normalizeType(current)
+            if norm != current:
+                changed += 1
+                if not dry:
+                    sqlExecSafe("UPDATE GraphKB.Entity SET entityType = ? WHERE %ID = ?", norm, int(row[0]))
+        return changed
+
+    def onResolve(self, request):
+        try:
+            lang = request.lang
+            dry = int(request.dryRun) == 1
+            # survivor names the user deselected in the preview - skipped on apply
+            try:
+                exclude = set(json.loads(getattr(request, "excludeJson", "") or "[]"))
+            except ValueError:
+                exclude = set()
+            entById = self.loadEntities(lang)
+            pairs = self.candidatePairs(lang, entById)
+            matchPairs = []
+            for (x, y), sim in pairs.items():
+                ok, _why = self.isMatch(entById[x], entById[y], sim)
+                if ok:
+                    matchPairs.append((x, y))
+            clusters = [c for c in unionFind(matchPairs, list(entById.keys()))
+                        if len(c) <= int(self.maxClusterSize)]
+
+            report, merged = [], 0
+            for members in clusters:
+                survivor = self.pickSurvivor(members, entById)
+                survName = entById[survivor]["name"]
+                if not dry and survName in exclude:
+                    continue   # user unchecked this group in the preview
+                losers = [m for m in members if m != survivor]
+                report.append({"survivor": survName,
+                               "members": [entById[m]["name"] for m in members]})
+                if not dry:
+                    self.mergeCluster(survivor, losers, entById)
+                    merged += len(losers)
+            if not dry and clusters:
+                self.cleanRelationships()
+            # also clean noisy aliases (an alias that is really another entity's name) and
+            # canonicalize inconsistent entity types ('LOCATION' / 'Location/Object' -> 'Location')
+            scrubbed = self.scrubAliases(lang, dry)
+            typesFixed = self.normalizeTypes(lang, dry)
+
+            reportJson = json.dumps({"dryRun": dry, "lang": lang, "clusterCount": len(report),
+                                     "merged": merged, "scrubbed": scrubbed, "typesFixed": typesFixed,
+                                     "clusters": report}, ensure_ascii=False)
+            detail = ((("Previewed " if dry else "Merged ") + str(len(report)) + " group(s), "
+                       + ("would clean " if dry else "cleaned ") + str(scrubbed) + " alias(es), "
+                       + ("would fix " if dry else "fixed ") + str(typesFixed) + " type(s)"))
+            IRISLog.Info("resolution (" + ("dry-run" if dry else "applied") + ", " + lang + "): "
+                         + str(len(clusters)) + " clusters, " + str(merged) + " merged, "
+                         + str(scrubbed) + " aliases scrubbed, " + str(typesFixed) + " types fixed")
+            updateChatStatus(request.requestId, "done", detail, reportJson)
+            return Status.OK(), resolveResponse(len(clusters), merged, reportJson)
+        except Exception as e:
+            detail = str(e) or repr(e)
+            status, _ = logErrorAndReturnStatus("ERROR in resolutionOperation onResolve: " + detail)
+            try:
+                updateChatStatus(request.requestId, "error", "Resolution failed: " + detail)
+            except Exception:
+                pass
+            return status, resolveResponse(0, 0, "{}")

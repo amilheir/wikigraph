@@ -6,7 +6,7 @@ from intersystems_pyprod import IRISProperty, BusinessProcess, IRISLog, Status
 
 from common import (statusIsOk, logErrorAndReturnStatus, updateChatStatus, documentExists,
                     insertRow, nowTimestamp, chunkArticleText, parseLlmJson, sqlExec,
-                    normalizeAliases, mergeAliasJson)
+                    normalizeAliases, mergeAliasJson, normalizeName, normalizeType)
 from messages import (chatRequestMsg, chatResponseMsg, knowledgeSearchRequest, wikiFetchRequest,
                       ingestRequest, ingestResponse, extractEntitiesMsg, generateAnswerMsg)
 
@@ -24,7 +24,7 @@ class chatProcess(BusinessProcess):
     ingestTarget = IRISProperty(default="ingestProcess", settings="Target:selector?context={Ens.ContextSearch/ProductionItems?targets=1&productionName=@productionId}")
     llmTarget = IRISProperty(default="llmOperation", settings="Target:selector?context={Ens.ContextSearch/ProductionItems?targets=1&productionName=@productionId}")
     similarityThreshold = IRISProperty(
-        default="0.6",
+        default="0.55",
         description="Below this best cosine score the process learns from Wikipedia",
         settings="Search")
     searchTopK = IRISProperty(
@@ -48,7 +48,7 @@ class chatProcess(BusinessProcess):
             if float(searchResp.bestScore) < float(self.similarityThreshold):
                 updateChatStatus(requestId, "learning", "Learning about this topic from Wikipedia")
                 status, wikiResp = self.SendRequestSync(
-                    self.wikipediaTarget, wikiFetchRequest(request.question, request.lang))
+                    self.wikipediaTarget, wikiFetchRequest(request.question, request.lang, 1))
                 if statusIsOk(status) and int(wikiResp.found) == 1:
                     if not documentExists(wikiResp.pageId, request.lang):
                         updateChatStatus(requestId, "learning",
@@ -82,7 +82,9 @@ class chatProcess(BusinessProcess):
         without generating an answer. Used by the 'Add an article' control in Manage knowledge."""
         try:
             updateChatStatus(requestId, "learning", "Looking up '" + title + "' on Wikipedia")
-            status, wikiResp = self.SendRequestSync(self.wikipediaTarget, wikiFetchRequest(title, lang))
+            # add-by-title: search the exact title, no LLM distillation (it can swap the subject,
+            # e.g. 'han solo' -> 'Darth Vader'); the user already gave the canonical title.
+            status, wikiResp = self.SendRequestSync(self.wikipediaTarget, wikiFetchRequest(title, lang, 0))
             if not (statusIsOk(status) and int(wikiResp.found) == 1):
                 updateChatStatus(requestId, "error", "No Wikipedia article found for '" + title + "'")
                 return Status.OK(), chatResponseMsg(requestId, "")
@@ -174,7 +176,7 @@ class ingestProcess(BusinessProcess):
         name = (name or "").strip()[:290]
         if not name:
             return 0
-        entityType = (entityType or "Unknown")[:90]
+        entityType = normalizeType(entityType)[:90]
         aliasList = normalizeAliases(aliases)
         # dedup by name + lang only: identity is the canonical NAME, not the LLM's free-text type. The
         # type was unreliable as a key - the same entity gets typed "Droid" on one chunk and "Droide"
@@ -205,12 +207,28 @@ class ingestProcess(BusinessProcess):
         except Exception as e:
             IRISLog.Warning("could not parse extraction JSON: " + str(e))
             return 0
+        if not isinstance(graph, dict):
+            IRISLog.Warning("extraction JSON was not a JSON object; skipping chunk")
+            return 0
+
+        # the LLM sometimes returns entities/relationships as bare strings instead of objects, so
+        # keep only the dict items - otherwise a malformed chunk crashes the whole ingest with
+        # 'str' object has no attribute 'get'.
+        chunkEntities = [e for e in graph.get("entities", []) if isinstance(e, dict)][:int(self.maxEntitiesPerChunk)]
+        # every canonical name in play (this chunk + the running registry) - an alias that matches
+        # one of these is really a DIFFERENT entity mislabelled as an alias, so drop it.
+        otherNames = set(normalizeName(e.get("name") or "") for e in chunkEntities)
+        otherNames.update(normalizeName(n) for n in registry.keys())
+        otherNames.discard("")
 
         nameToId = {}     # canonical name AND aliases -> id, so relationships resolve either way
         storedIds = set()
-        for entity in graph.get("entities", [])[:int(self.maxEntitiesPerChunk)]:
+        for entity in chunkEntities:
             name = (entity.get("name") or "").strip()
-            aliases = entity.get("aliases") or []
+            selfNorm = normalizeName(name)
+            aliases = [a for a in (entity.get("aliases") or [])
+                       if isinstance(a, str)
+                       and not (normalizeName(a) in otherNames and normalizeName(a) != selfNorm)]
             entityId = self.upsertEntity(name, entity.get("type"), entity.get("description"),
                                          lang, documentId, aliases)
             if not entityId:
@@ -226,6 +244,8 @@ class ingestProcess(BusinessProcess):
                 sqlExec("INSERT INTO GraphKB.EntityMention (entityRef, chunkRef) VALUES (?, ?)", entityId, chunkId)
 
         for relationship in graph.get("relationships", []):
+            if not isinstance(relationship, dict):
+                continue
             sourceId = nameToId.get((relationship.get("source") or "").strip().lower())
             targetId = nameToId.get((relationship.get("target") or "").strip().lower())
             if sourceId and targetId and sourceId != targetId:

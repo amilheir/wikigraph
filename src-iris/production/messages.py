@@ -32,6 +32,7 @@ class knowledgeSearchResponse(JsonSerialize):
 class wikiFetchRequest(JsonSerialize):
     topic = Column()
     lang = Column()
+    distill = Column(datatype=int)   # 1 = LLM-distil the topic (chat questions); 0 = use verbatim (add-by-title)
 
 
 class wikiFetchResponse(JsonSerialize):
@@ -75,3 +76,17 @@ class generateAnswerMsg(JsonSerialize):
 
 class llmResponseMsg(JsonSerialize):
     content = ""
+
+
+class resolveEntitiesMsg(JsonSerialize):
+    requestId = Column(datatype=int)
+    lang = Column()
+    documentId = Column(datatype=int)   # 0 = full-language sweep
+    dryRun = Column(datatype=int)       # 1 = report proposed merges only, no writes
+    excludeJson = ""                    # JSON list of survivor names the user deselected (skip on apply)
+
+
+class resolveResponse(JsonSerialize):
+    clusters = Column(datatype=int)
+    merged = Column(datatype=int)
+    report = ""
